@@ -1,0 +1,21 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="32" cy="32" r="28" stroke="#E5E7EB" stroke-width="4" opacity="0.3"/>
+  <circle cx="32" cy="32" r="28" stroke="#3B82F6" stroke-width="4" stroke-linecap="round" stroke-dasharray="44 132" stroke-dashoffset="44" opacity="0.8">
+    <animateTransform
+      attributeName="transform"
+      type="rotate"
+      values="0 32 32;360 32 32"
+      dur="1s"
+      repeatCount="indefinite"
+    />
+  </circle>
+  <circle cx="32" cy="32" r="20" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-dasharray="32 96" stroke-dashoffset="32" opacity="0.6">
+    <animateTransform
+      attributeName="transform"
+      type="rotate"
+      values="360 32 32;0 32 32"
+      dur="1.5s"
+      repeatCount="indefinite"
+    />
+  </circle>
+</svg>

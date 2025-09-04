@@ -1,0 +1,5 @@
+---
+description:always check the folders and files to understand what are missing or what files need to delete and always make sure that project pages are responsive and suitable for all screen sizes and mobile screen size.
+globs:
+alwaysApply: true
+---
