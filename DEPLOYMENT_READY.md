@@ -25,12 +25,9 @@ The application now builds successfully without any errors!
 
 ### Environment Variables Required in Vercel:
 ```
-# Database connection (still needed for data storage)
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-# No authentication environment variables needed!
-# The app uses built-in simple authentication with predefined users.
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 ```
 
 ### Deployment Commands:

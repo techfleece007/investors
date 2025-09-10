@@ -28,8 +28,8 @@ export async function middleware(request: NextRequest) {
       request.nextUrl.pathname.startsWith(route)
     )
 
-    // Let all requests through and handle auth on the client side
-    // Simple auth doesn't require server-side validation
+    // For now, let all requests through and handle auth on the client side
+    // This avoids Edge Runtime issues with Supabase
     return response
   } catch (error) {
     console.error('Middleware error:', error)

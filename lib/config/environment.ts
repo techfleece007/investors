@@ -46,7 +46,6 @@ export const env = getEnvironmentConfig()
 export function validateEnvironment(): { isValid: boolean; errors: string[] } {
   const errors: string[] = []
   
-  // Validate Supabase configuration for database operations
   if (!env.supabaseUrl) {
     errors.push('NEXT_PUBLIC_SUPABASE_URL is not set')
   }
@@ -89,7 +88,6 @@ export function logEnvironmentInfo() {
       hasAnonKey: !!env.supabaseAnonKey,
       apiTimeout: env.apiTimeout,
       retryAttempts: env.retryAttempts,
-      authType: 'simple'
     })
   }
 }
