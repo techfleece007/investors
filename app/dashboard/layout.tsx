@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth/auth-context'
 import { 
   Package, 
   ShoppingCart, 
@@ -28,34 +28,30 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [user, setUser] = useState<any>(null)
   const router = useRouter()
-  const supabase = createClient()
+  const { user, isAuthenticated, isLoading, signOut } = useAuth()
 
   useEffect(() => {
-    checkUser()
-  }, [])
-
-  const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    if (!isLoading && !isAuthenticated) {
       router.push('/login')
-    } else {
-      setUser(user)
     }
-  }
+  }, [isAuthenticated, isLoading, router])
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    await signOut()
     router.push('/login')
   }
 
-  if (!user) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
       </div>
     )
+  }
+
+  if (!isAuthenticated || !user) {
+    return null
   }
 
   return (
@@ -129,7 +125,7 @@ export default function DashboardLayout({
             
             <div className="flex items-center gap-4">
               <span className="text-sm text-muted-foreground">
-                Welcome, {user.email}
+                Welcome, {user.name}
               </span>
               <button
                 onClick={handleSignOut}
