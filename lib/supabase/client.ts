@@ -1,9 +1,12 @@
 import { createBrowserClient } from '@supabase/ssr'
+import { env, getNetworkConfig } from '@/lib/config/environment'
 
 export function createClient() {
+  const networkConfig = getNetworkConfig()
+  
   return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.supabaseUrl,
+    env.supabaseAnonKey,
     {
       cookies: {
         get(name: string) {
@@ -44,7 +47,10 @@ export function createClient() {
       },
       global: {
         headers: {
-          'X-Client-Info': 'mobile-friendly-client'
+          'X-Client-Info': 'mobile-friendly-client',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...networkConfig.headers
         }
       }
     }
