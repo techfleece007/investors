@@ -4,8 +4,19 @@ import { env, getNetworkConfig } from '@/lib/config/environment'
 export function createClient() {
   const networkConfig = getNetworkConfig()
   
+  // Validate environment variables
+  if (!env.supabaseUrl || !env.supabaseAnonKey) {
+    console.error('Missing Supabase configuration. Please check your environment variables.')
+    throw new Error('Supabase configuration is missing')
+  }
+
+  // Ensure Supabase URL is properly formatted
+  const supabaseUrl = env.supabaseUrl.endsWith('/') 
+    ? env.supabaseUrl.slice(0, -1) 
+    : env.supabaseUrl
+
   return createBrowserClient(
-    env.supabaseUrl,
+    supabaseUrl,
     env.supabaseAnonKey,
     {
       cookies: {
@@ -47,10 +58,20 @@ export function createClient() {
       },
       global: {
         headers: {
-          'X-Client-Info': 'mobile-friendly-client',
+          'X-Client-Info': 'trading-dashboard-client',
           'Accept': 'application/json',
           'Content-Type': 'application/json',
           ...networkConfig.headers
+        }
+      },
+      // Add database configuration for better connection handling
+      db: {
+        schema: 'public'
+      },
+      // Add realtime configuration
+      realtime: {
+        params: {
+          eventsPerSecond: 10
         }
       }
     }

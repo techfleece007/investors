@@ -350,9 +350,46 @@ export default function OrdersPage() {
     })
   }
 
-  const handleEditOrder = (order: Order) => {
-    // For now, we'll show an alert. In a full implementation, you'd open an edit modal
-    alert(`Edit functionality for Order #${order.order_number} will be implemented. This would allow updating order status, which would automatically update product quantities and profits.`)
+  const handleEditOrder = async (order: Order) => {
+    try {
+      // Get all orders with the same order number
+      const { data: orderData, error: fetchError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('order_number', order.order_number)
+        .order('created_at', { ascending: false })
+
+      if (fetchError) throw fetchError
+
+      if (!orderData || orderData.length === 0) {
+        alert('Order not found')
+        return
+      }
+
+      // Show edit modal with current order data
+      const newStatus = prompt(
+        `Edit Order #${order.order_number}\n\nCurrent Status: ${order.status}\n\nEnter new status (pending/completed/canceled):`,
+        order.status
+      )
+
+      if (newStatus && newStatus !== order.status && ['pending', 'completed', 'canceled'].includes(newStatus)) {
+        // Update all orders with the same order number
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({ status: newStatus })
+          .eq('order_number', order.order_number)
+
+        if (updateError) throw updateError
+
+        alert(`Order #${order.order_number} status updated to ${newStatus}`)
+        fetchData() // Refresh the data
+      } else if (newStatus && !['pending', 'completed', 'canceled'].includes(newStatus)) {
+        alert('Invalid status. Please enter: pending, completed, or canceled')
+      }
+    } catch (error) {
+      console.error('Error editing order:', error)
+      alert('Error updating order. Please try again.')
+    }
   }
 
   const handleDeleteOrder = async (orderId: string) => {

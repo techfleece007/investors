@@ -31,28 +31,40 @@ export default function LoginPage() {
       // Test network connectivity first
       if (!networkStatus.isOnline) {
         setError('No internet connection. Please check your network and try again.')
+        setLoading(false)
+        return
+      }
+
+      // Basic network connectivity check
+      if (!networkStatus.isOnline) {
+        setError('No internet connection. Please check your network and try again.')
+        setLoading(false)
         return
       }
 
       // Use retry logic for the auth request
-      const { error } = await retryWithBackoff(async () => {
+      const { data, error } = await retryWithBackoff(async () => {
         return await supabase.auth.signInWithPassword({
-          email,
+          email: email.trim(),
           password,
         })
       }, 3, 2000)
 
       if (error) {
-        // Provide more specific error messages
-        if (error.message.includes('Invalid login credentials')) {
-          setError('Invalid email or password. Please check your credentials.')
+        // Provide specific error messages
+        if (error.message.includes('Invalid login credentials') || error.message.includes('Invalid credentials')) {
+          setError('Invalid email or password. Please check your credentials and try again.')
         } else if (error.message.includes('Email not confirmed')) {
-          setError('Please check your email and click the confirmation link.')
+          setError('Please check your email and click the confirmation link before signing in.')
+        } else if (error.message.includes('Too many requests')) {
+          setError('Too many login attempts. Please wait a few minutes before trying again.')
         } else {
           setError(getNetworkErrorMessage(error))
         }
-      } else {
+      } else if (data?.user) {
         router.push('/dashboard')
+      } else {
+        setError('Login failed. Please try again.')
       }
     } catch (error: any) {
       console.error('Login error:', error)

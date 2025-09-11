@@ -29,49 +29,6 @@ export function isSlowConnection(): boolean {
   return status.effectiveType === 'slow-2g' || status.effectiveType === '2g' || (status.downlink ? status.downlink < 1 : false)
 }
 
-export async function testConnectivity(url: string = 'https://yzfbkrswdizehjucrmev.supabase.co'): Promise<boolean> {
-  try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
-
-    // Use a simple GET request to the Supabase health endpoint instead of HEAD
-    // This endpoint is designed to be accessible and doesn't require CORS
-    const healthUrl = `${url}/rest/v1/`
-    const response = await fetch(healthUrl, {
-      method: 'GET',
-      mode: 'cors',
-      signal: controller.signal,
-      cache: 'no-cache',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
-    })
-
-    clearTimeout(timeoutId)
-    // Even if we get a 401/403, it means the server is reachable
-    return response.status < 500
-  } catch (error) {
-    console.warn('Connectivity test failed:', error)
-    // Fallback: test basic internet connectivity
-    return await testBasicConnectivity()
-  }
-}
-
-async function testBasicConnectivity(): Promise<boolean> {
-  try {
-    // Test with a simple, reliable endpoint that allows CORS
-    const response = await fetch('https://httpbin.org/status/200', {
-      method: 'GET',
-      mode: 'cors',
-      cache: 'no-cache'
-    })
-    return response.ok
-  } catch (error) {
-    console.warn('Basic connectivity test failed:', error)
-    return false
-  }
-}
 
 export function setupNetworkMonitoring(callback: (status: NetworkStatus) => void): () => void {
   if (typeof window === 'undefined') {

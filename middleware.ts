@@ -10,32 +10,37 @@ export async function middleware(request: NextRequest) {
       },
     })
 
-    // Add CORS headers for better network compatibility
+    // CORS headers for Supabase compatibility
     response.headers.set('Access-Control-Allow-Origin', '*')
-    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+    response.headers.set('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type, x-requested-with, accept, origin, referer, user-agent')
+    response.headers.set('Access-Control-Allow-Credentials', 'false')
     response.headers.set('Access-Control-Max-Age', '86400')
+    response.headers.set('Access-Control-Expose-Headers', 'content-range, x-total-count')
 
     // Handle preflight requests
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 200, headers: response.headers })
+      return new Response(null, { 
+        status: 200, 
+        headers: response.headers 
+      })
     }
 
-    // Simple route protection - redirect to login for dashboard routes
-    // Authentication will be handled by the client-side components
-    const protectedRoutes = ['/dashboard']
-    const isProtectedRoute = protectedRoutes.some(route => 
-      request.nextUrl.pathname.startsWith(route)
-    )
+    // Security headers
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    response.headers.set('X-Frame-Options', 'DENY')
+    response.headers.set('X-XSS-Protection', '1; mode=block')
+    response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
 
-    // For now, let all requests through and handle auth on the client side
-    // This avoids Edge Runtime issues with Supabase
     return response
   } catch (error) {
     console.error('Middleware error:', error)
     
-    // If there's an error, still allow the request to proceed
+    // If there's an error, still allow the request to proceed with basic CORS
     const response = NextResponse.next()
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
     response.headers.set('X-Middleware-Error', 'true')
     response.headers.set('X-Middleware-Error-Message', error instanceof Error ? error.message : 'Unknown error')
     
