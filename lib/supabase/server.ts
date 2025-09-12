@@ -1,14 +1,14 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { env, getNetworkConfig } from '@/lib/config/environment'
 
 export function createClient() {
   const cookieStore = cookies()
-  const networkConfig = getNetworkConfig()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
   return createServerClient(
-    env.supabaseUrl,
-    env.supabaseAnonKey,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         get(name: string) {
@@ -16,14 +16,7 @@ export function createClient() {
         },
         set(name: string, value: string, options: any) {
           try {
-            // Mobile-friendly cookie options
-            const mobileFriendlyOptions = {
-              ...options,
-              sameSite: 'lax' as const,
-              secure: process.env.NODE_ENV === 'production',
-              httpOnly: false // Allow client-side access for mobile compatibility
-            }
-            cookieStore.set(name, value, mobileFriendlyOptions)
+            cookieStore.set(name, value, options)
           } catch {
             // The `set` method was called from a Server Component.
             // This can be ignored if you have middleware refreshing
@@ -32,14 +25,7 @@ export function createClient() {
         },
         remove(name: string, options: any) {
           try {
-            const mobileFriendlyOptions = {
-              ...options,
-              maxAge: 0,
-              sameSite: 'lax' as const,
-              secure: process.env.NODE_ENV === 'production',
-              httpOnly: false
-            }
-            cookieStore.set(name, '', mobileFriendlyOptions)
+            cookieStore.set(name, '', { ...options, maxAge: 0 })
           } catch {
             // The `remove` method was called from a Server Component.
             // This can be ignored if you have middleware refreshing

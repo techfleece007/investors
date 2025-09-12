@@ -5,21 +5,28 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { LogIn, Eye, EyeOff, Wifi, WifiOff } from 'lucide-react'
 import Image from 'next/image'
-import { getNetworkStatus, getNetworkErrorMessage, retryWithBackoff, setupNetworkMonitoring } from '@/lib/utils/network'
-
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [networkStatus, setNetworkStatus] = useState(getNetworkStatus())
+  const [isOnline, setIsOnline] = useState(true)
   const router = useRouter()
   const supabase = createClient()
 
   useEffect(() => {
-    const cleanup = setupNetworkMonitoring(setNetworkStatus)
-    return cleanup
+    // Simple online/offline detection
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -29,26 +36,16 @@ export default function LoginPage() {
 
     try {
       // Test network connectivity first
-      if (!networkStatus.isOnline) {
+      if (!isOnline) {
         setError('No internet connection. Please check your network and try again.')
         setLoading(false)
         return
       }
 
-      // Basic network connectivity check
-      if (!networkStatus.isOnline) {
-        setError('No internet connection. Please check your network and try again.')
-        setLoading(false)
-        return
-      }
-
-      // Use retry logic for the auth request
-      const { data, error } = await retryWithBackoff(async () => {
-        return await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        })
-      }, 3, 2000)
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
 
       if (error) {
         // Provide specific error messages
@@ -58,8 +55,10 @@ export default function LoginPage() {
           setError('Please check your email and click the confirmation link before signing in.')
         } else if (error.message.includes('Too many requests')) {
           setError('Too many login attempts. Please wait a few minutes before trying again.')
+        } else if (error.message.includes('Failed to fetch')) {
+          setError('Network error. Please check your internet connection and try again.')
         } else {
-          setError(getNetworkErrorMessage(error))
+          setError(error.message || 'Login failed. Please try again.')
         }
       } else if (data?.user) {
         router.push('/dashboard')
@@ -68,7 +67,7 @@ export default function LoginPage() {
       }
     } catch (error: any) {
       console.error('Login error:', error)
-      setError(getNetworkErrorMessage(error))
+      setError('Network error. Please check your internet connection and try again.')
     } finally {
       setLoading(false)
     }
@@ -96,7 +95,7 @@ export default function LoginPage() {
           
           {/* Network Status Indicator */}
           <div className="mt-4 flex items-center justify-center space-x-2 text-sm">
-            {networkStatus.isOnline ? (
+            {isOnline ? (
               <div className="flex items-center space-x-1 text-green-600">
                 <Wifi className="h-4 w-4" />
                 <span>Online</span>
@@ -175,7 +174,7 @@ export default function LoginPage() {
           <div>
             <button
               type="submit"
-              disabled={loading || !networkStatus.isOnline}
+              disabled={loading || !isOnline}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
@@ -183,7 +182,7 @@ export default function LoginPage() {
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                   <span>Signing in...</span>
                 </div>
-              ) : !networkStatus.isOnline ? (
+              ) : !isOnline ? (
                 <div className="flex items-center space-x-2">
                   <WifiOff className="h-5 w-5" />
                   <span>No connection</span>

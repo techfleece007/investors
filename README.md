@@ -7,9 +7,12 @@ A fullstack dashboard application for inventory and profit management, built wit
 - **Authentication**: Secure login for two investors (Shady & Tamer)
 - **Product Management**: Add, edit, and delete products with variants (size, stock, price, cost)
 - **Order Management**: Create orders with automatic stock updates and profit calculations
+- **Order Status Management**: Update order status (pending, completed, canceled) with automatic quantity restoration
+- **Email Notifications**: Automatic email alerts to investors for order status changes
+- **Advanced Order Filtering**: Filter orders by status and date ranges (today, week, month, year, custom)
 - **Shipment Tracking**: Monitor shipment status (pending, shipped, delivered)
 - **Expense Tracking**: Manage business expenses with categorization
-- **Profit Analytics**: Visual charts showing profit distribution (80% Shady, 20% Tamer)
+- **Profit Analytics**: Visual charts showing profit distribution (80% Shady, 20% Tamer) with canceled order impact
 - **Responsive Design**: Mobile-first design that works on all screen sizes
 - **Dark Theme**: Modern dark theme with consistent styling
 
@@ -49,7 +52,15 @@ Edit `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+EMAIL_PASSWORD=your_gmail_app_password
+NEXT_PUBLIC_APP_URL=https://your-production-domain.com
 ```
+
+**Important**: 
+- The `EMAIL_PASSWORD` should be a Gmail App Password, not your regular Gmail password
+- The `NEXT_PUBLIC_APP_URL` should be your production domain (e.g., `https://trading-dashboard.vercel.app`)
+- See the Email Setup section below for detailed instructions
 
 ### 3. Database Setup
 
@@ -70,13 +81,57 @@ Create two users in Supabase Auth:
 - **Shady**: Primary investor (80% profit share)
 - **Tamer**: Secondary investor (20% profit share)
 
-### 5. Run the Development Server
+### 5. Email Setup (Gmail App Password)
+
+To enable email notifications, you need to set up a Gmail App Password:
+
+1. **Enable 2-Factor Authentication** on your Gmail account (prvyit@gmail.com)
+2. **Generate App Password**:
+   - Go to [Google Account Settings](https://myaccount.google.com/)
+   - Navigate to Security → 2-Step Verification → App passwords
+   - Select "Mail" and "Other (Custom name)"
+   - Enter "Trading Dashboard" as the app name
+   - Copy the generated 16-character password
+3. **Add to Environment**:
+   - Add the generated password to your `.env.local` file as `EMAIL_PASSWORD=your_generated_password`
+   - **Never use your regular Gmail password** - only use the App Password
+
+**Email Configuration**:
+- **From**: prvyit@gmail.com
+- **To**: qudaih.tamer@gmail.com
+- **Triggers**: New orders created, order status changes (pending/completed/canceled)
+
+### 6. Run the Development Server
 
 ```bash
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### 7. Production Deployment
+
+For production deployment (e.g., Vercel, Netlify, etc.):
+
+1. **Set Environment Variables** in your hosting platform:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `EMAIL_PASSWORD` (Gmail App Password)
+   - `NEXT_PUBLIC_APP_URL` (your production domain)
+
+2. **Deploy the application** using your preferred platform
+
+3. **Test email functionality** by creating a test order
+
+**Example Vercel Environment Variables:**
+```
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+EMAIL_PASSWORD=your_16_character_app_password
+NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
+```
 
 ## Project Structure
 
@@ -85,17 +140,23 @@ trading-dashboard/
 ├── app/                          # Next.js App Router
 │   ├── (auth)/                  # Authentication routes
 │   │   └── login/               # Login page
+│   ├── api/                     # API routes
+│   │   └── send-email/          # Email notification API
+│   │       └── route.ts         # Email sending endpoint
 │   ├── dashboard/               # Dashboard routes
 │   │   ├── layout.tsx           # Dashboard layout with sidebar
 │   │   ├── page.tsx             # Products page (main dashboard)
-│   │   ├── orders/              # Orders management
+│   │   ├── orders/              # Orders management with filtering
 │   │   ├── shipments/           # Shipment tracking
 │   │   ├── expenses/            # Expense management
-│   │   └── profits/             # Profit analytics
+│   │   └── profits/             # Profit analytics with canceled orders
 │   ├── globals.css              # Global styles and CSS variables
 │   └── layout.tsx               # Root layout
 ├── lib/                         # Utility libraries
 │   ├── supabase/                # Supabase client/server configs
+│   ├── utils/                   # Utility functions
+│   │   ├── email.ts             # Email notification utility
+│   │   └── paymentFees.ts       # Payment fees calculation
 │   └── utils.ts                 # Helper functions
 ├── public/                      # Static assets
 │   ├── images/                  # Product images
@@ -124,11 +185,16 @@ trading-dashboard/
 - Create orders from available product variants
 - Automatic payment fees calculation (Cash: 0%, Card: 2.9% + 1 AED + 0.5% VAT, Tabby: 6.99% + 1.5 AED + 6 AED + 0.5% VAT)
 - Automatic stock reduction via SQL triggers
+- Order status management (pending, completed, canceled)
+- **Automatic quantity restoration** when orders are canceled
+- **Email notifications** for all order status changes
+- **Advanced filtering** by status and date ranges
 - Profit calculation and recording
 
 ### Profit Distribution
 - 80% Shady, 20% Tamer split based on net profit after all deductions
 - Net profit = Total Revenue - Delivery Fees - Payment Fees - Product Costs - Business Expenses
+- **Canceled order impact tracking** - shows lost revenue and costs from canceled orders
 - Visual charts (pie chart, line chart, bar chart)
 - Time-based filtering (week/month/year)
 - Product performance analytics
@@ -155,6 +221,22 @@ All data operations are handled through Supabase:
 - **Shipments**: Track delivery status
 - **Expenses**: Manage business costs
 - **Profits**: View profit analytics
+
+## Recent Updates (v2.0)
+
+### New Features Added
+- **Order Status Management**: Complete order lifecycle management with status updates
+- **Automatic Quantity Restoration**: When orders are canceled, product quantities are automatically restored
+- **Email Notifications**: Real-time email alerts to investors for all order changes
+- **Advanced Order Filtering**: Filter orders by status (pending/completed/canceled) and date ranges
+- **Canceled Order Analytics**: Detailed tracking of canceled order impact on profits
+- **Enhanced Profit Calculations**: Accurate profit calculations excluding canceled orders
+
+### Technical Improvements
+- **API Routes**: Server-side email handling for better security and performance
+- **Error Handling**: Robust error handling for email failures
+- **Real-time Updates**: Live filtering and status updates
+- **Mobile Optimization**: Enhanced mobile experience for order management
 
 ## Styling
 

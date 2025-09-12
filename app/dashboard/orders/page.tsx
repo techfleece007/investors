@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit } from 'lucide-react'
+import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter } from 'lucide-react'
 import { calculatePaymentFees } from '@/lib/utils/paymentFees'
+import { sendOrderNotification } from '@/lib/utils/email'
 
 interface Order {
   id: string
@@ -49,12 +50,19 @@ interface OrderItem {
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [productVariants, setProductVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
+  const [filters, setFilters] = useState({
+    status: 'all' as 'all' | 'pending' | 'completed' | 'canceled',
+    dateFilter: 'all' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    customDateFrom: '',
+    customDateTo: ''
+  })
   const [formData, setFormData] = useState({
     order_number: '',
     shipping_number: '',
@@ -68,6 +76,10 @@ export default function OrdersPage() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  useEffect(() => {
+    applyFilters()
+  }, [orders, filters])
 
   const fetchData = async () => {
     try {
@@ -160,6 +172,58 @@ export default function OrdersPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const applyFilters = () => {
+    let filtered = [...orders]
+
+    // Filter by status
+    if (filters.status !== 'all') {
+      filtered = filtered.filter(order => order.status === filters.status)
+    }
+
+    // Filter by date
+    if (filters.dateFilter !== 'all') {
+      const now = new Date()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      
+      filtered = filtered.filter(order => {
+        const orderDate = new Date(order.created_at)
+        
+        switch (filters.dateFilter) {
+          case 'today':
+            return orderDate >= today
+          case 'week':
+            const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+            return orderDate >= weekAgo
+          case 'month':
+            const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+            return orderDate >= monthAgo
+          case 'year':
+            const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
+            return orderDate >= yearAgo
+          case 'custom':
+            if (filters.customDateFrom && filters.customDateTo) {
+              const fromDate = new Date(filters.customDateFrom)
+              const toDate = new Date(filters.customDateTo)
+              toDate.setHours(23, 59, 59, 999) // Include the entire end date
+              return orderDate >= fromDate && orderDate <= toDate
+            }
+            return true
+          default:
+            return true
+        }
+      })
+    }
+
+    setFilteredOrders(filtered)
+  }
+
+  const handleFilterChange = (filterType: string, value: string) => {
+    setFilters(prev => ({
+      ...prev,
+      [filterType]: value
+    }))
   }
 
   const addOrderItem = () => {
@@ -289,8 +353,8 @@ export default function OrdersPage() {
 
     try {
       // Generate order and shipping numbers if not provided
-      const orderNumber = formData.order_number || Math.floor(Math.random() * 9000) + 1000
-      const shippingNumber = formData.shipping_number || Math.floor(Math.random() * 900000) + 100000
+      const orderNumber = formData.order_number ? parseInt(formData.order_number) : Math.floor(Math.random() * 9000) + 1000
+      const shippingNumber = formData.shipping_number ? parseInt(formData.shipping_number) : Math.floor(Math.random() * 900000) + 100000
 
       // Calculate total order amount (without fees - fees are only for profit calculation)
       const totalOrderAmount = orderItems.reduce((sum, item) => sum + item.total_price, 0)
@@ -317,6 +381,27 @@ export default function OrdersPage() {
 
         // Note: Product quantity updates and profit calculations are handled automatically by SQL triggers
         // Each product gets its own row with its specific size and quantity
+      }
+
+      // Send email notification for new order
+      try {
+        for (const item of orderItems) {
+          await sendOrderNotification({
+            order_number: orderNumber,
+            status: 'completed',
+            product_name: item.product_name,
+            sizes: item.size,
+            quantity: item.quantity,
+            total_price: item.total_price,
+            payment_method: formData.payment_method,
+            payment_fees: formData.payment_fees / orderItems.length,
+            delivery_fees: formData.delivery_fees / orderItems.length,
+            created_at: new Date().toISOString()
+          })
+        }
+      } catch (emailError) {
+        console.error('Error sending email notification:', emailError)
+        // Don't fail the order creation if email fails
       }
 
       setShowSuccess(true)
@@ -355,7 +440,13 @@ export default function OrdersPage() {
       // Get all orders with the same order number
       const { data: orderData, error: fetchError } = await supabase
         .from('orders')
-        .select('*')
+        .select(`
+          *,
+          products (
+            name,
+            cost_per_piece
+          )
+        `)
         .eq('order_number', order.order_number)
         .order('created_at', { ascending: false })
 
@@ -373,6 +464,56 @@ export default function OrdersPage() {
       )
 
       if (newStatus && newStatus !== order.status && ['pending', 'completed', 'canceled'].includes(newStatus)) {
+        const oldStatus = order.status
+
+        // Handle quantity restoration for canceled orders
+        if (newStatus === 'canceled' && oldStatus !== 'canceled') {
+          // Restore quantities for all products in this order
+          for (const orderItem of orderData) {
+            // Find the product variant to restore quantity
+            const variant = productVariants.find(v => 
+              v.product_id === orderItem.product_id && v.size === orderItem.sizes
+            )
+            
+            if (variant) {
+              const { error: variantError } = await supabase
+                .from('product_variants')
+                .update({ 
+                  quantity: variant.quantity + orderItem.quantity 
+                })
+                .eq('id', variant.id)
+
+              if (variantError) {
+                console.error('Error restoring variant quantity:', variantError)
+              }
+            }
+          }
+        }
+
+        // Handle quantity deduction for completed orders (if previously canceled)
+        if (newStatus === 'completed' && oldStatus === 'canceled') {
+          // Deduct quantities for all products in this order
+          for (const orderItem of orderData) {
+            // Find the product variant to deduct quantity
+            const variant = productVariants.find(v => 
+              v.product_id === orderItem.product_id && v.size === orderItem.sizes
+            )
+            
+            if (variant) {
+              const { error: variantError } = await supabase
+                .from('product_variants')
+                .update({ 
+                  quantity: Math.max(0, variant.quantity - orderItem.quantity)
+                })
+                .eq('id', variant.id)
+
+              if (variantError) {
+                console.error('Error deducting variant quantity:', variantError)
+              }
+            }
+          }
+        }
+
         // Update all orders with the same order number
         const { error: updateError } = await supabase
           .from('orders')
@@ -380,6 +521,27 @@ export default function OrdersPage() {
           .eq('order_number', order.order_number)
 
         if (updateError) throw updateError
+
+        // Send email notification for status changes
+        try {
+          for (const orderItem of orderData) {
+            await sendOrderNotification({
+              order_number: orderItem.order_number,
+              status: newStatus,
+              product_name: (orderItem.products as any)?.name || 'Unknown Product',
+              sizes: orderItem.sizes,
+              quantity: orderItem.quantity,
+              total_price: orderItem.total_price,
+              payment_method: orderItem.payment_method,
+              payment_fees: orderItem.payment_fees,
+              delivery_fees: orderItem.delivery_fees,
+              created_at: orderItem.created_at
+            })
+          }
+        } catch (emailError) {
+          console.error('Error sending email notification:', emailError)
+          // Don't fail the order update if email fails
+        }
 
         alert(`Order #${order.order_number} status updated to ${newStatus}`)
         fetchData() // Refresh the data
@@ -460,10 +622,69 @@ export default function OrdersPage() {
 
       {/* Orders Display */}
       <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+        {/* Filter Controls */}
+        <div className="p-4 border-b border-border bg-muted/50">
+          <div className="flex flex-wrap gap-4 items-center">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium text-foreground">Filters:</span>
+            </div>
+            
+            {/* Status Filter */}
+            <select
+              value={filters.status}
+              onChange={(e) => handleFilterChange('status', e.target.value)}
+              className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="completed">Completed</option>
+              <option value="canceled">Canceled</option>
+            </select>
+
+            {/* Date Filter */}
+            <select
+              value={filters.dateFilter}
+              onChange={(e) => handleFilterChange('dateFilter', e.target.value)}
+              className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+            >
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+              <option value="custom">Custom Range</option>
+            </select>
+
+            {/* Custom Date Range */}
+            {filters.dateFilter === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={filters.customDateFrom}
+                  onChange={(e) => handleFilterChange('customDateFrom', e.target.value)}
+                  className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                />
+                <span className="text-sm text-muted-foreground">to</span>
+                <input
+                  type="date"
+                  value={filters.customDateTo}
+                  onChange={(e) => handleFilterChange('customDateTo', e.target.value)}
+                  className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                />
+              </div>
+            )}
+
+            <div className="text-sm text-muted-foreground">
+              Showing {filteredOrders.length} of {orders.length} orders
+            </div>
+          </div>
+        </div>
+
         {/* Mobile Card View */}
         <div className="block lg:hidden">
-          {orders.map((order, index) => (
-            <div key={order.id} className={`p-4 ${index < orders.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800 mb-4' : ''}`}>
+          {filteredOrders.map((order, index) => (
+            <div key={order.id} className={`p-4 ${index < filteredOrders.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800 mb-4' : ''}`}>
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <h3 className="font-semibold text-foreground">Order #{order.order_number}</h3>
@@ -585,8 +806,8 @@ export default function OrdersPage() {
               </tr>
             </thead>
             <tbody className="bg-card divide-y divide-border">
-              {orders.map((order, index) => (
-                <tr key={order.id} className={`hover:bg-muted/30 ${index < orders.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800' : ''}`}>
+              {filteredOrders.map((order, index) => (
+                <tr key={order.id} className={`hover:bg-muted/30 ${index < filteredOrders.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800' : ''}`}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
                     #{order.order_number}
                   </td>

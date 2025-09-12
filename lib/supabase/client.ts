@@ -1,23 +1,23 @@
 import { createBrowserClient } from '@supabase/ssr'
-import { env, getNetworkConfig } from '@/lib/config/environment'
 
 export function createClient() {
-  const networkConfig = getNetworkConfig()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   
   // Validate environment variables
-  if (!env.supabaseUrl || !env.supabaseAnonKey) {
+  if (!supabaseUrl || !supabaseAnonKey) {
     console.error('Missing Supabase configuration. Please check your environment variables.')
     throw new Error('Supabase configuration is missing')
   }
 
   // Ensure Supabase URL is properly formatted
-  const supabaseUrl = env.supabaseUrl.endsWith('/') 
-    ? env.supabaseUrl.slice(0, -1) 
-    : env.supabaseUrl
+  const formattedUrl = supabaseUrl.endsWith('/') 
+    ? supabaseUrl.slice(0, -1) 
+    : supabaseUrl
 
   return createBrowserClient(
-    supabaseUrl,
-    env.supabaseAnonKey,
+    formattedUrl,
+    supabaseAnonKey,
     {
       cookies: {
         get(name: string) {
@@ -50,29 +50,10 @@ export function createClient() {
         }
       },
       auth: {
-        // Mobile-friendly auth settings
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: false, // Prevent issues with mobile browsers
-        flowType: 'pkce' // More secure and mobile-friendly
-      },
-      global: {
-        headers: {
-          'X-Client-Info': 'trading-dashboard-client',
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          ...networkConfig.headers
-        }
-      },
-      // Add database configuration for better connection handling
-      db: {
-        schema: 'public'
-      },
-      // Add realtime configuration
-      realtime: {
-        params: {
-          eventsPerSecond: 10
-        }
+        detectSessionInUrl: false,
+        flowType: 'pkce'
       }
     }
   )

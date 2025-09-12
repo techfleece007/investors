@@ -59,7 +59,7 @@ export default function ProfitsPage() {
             cost_per_piece
           )
         `)
-        .eq('status', 'completed')
+        .in('status', ['completed', 'canceled'])
         .order('created_at', { ascending: false })
 
       if (ordersError) throw ordersError
@@ -138,25 +138,45 @@ export default function ProfitsPage() {
       return acc
   }, {} as Record<number, any>)
 
-  // Calculate total revenue from completed orders
-  const totalRevenue = profits.reduce((sum, profit) => {
+  // Separate completed and canceled orders
+  const completedOrders = profits.filter(profit => profit.orders?.status === 'completed')
+  const canceledOrders = profits.filter(profit => profit.orders?.status === 'canceled')
+
+  // Calculate total revenue from completed orders only
+  const totalRevenue = completedOrders.reduce((sum, profit) => {
     return sum + (profit.orders?.total_price || 0)
   }, 0)
   
-  // Calculate total pieces sold
-  const totalPiecesSold = profits.reduce((sum, profit) => {
+  // Calculate total pieces sold from completed orders only
+  const totalPiecesSold = completedOrders.reduce((sum, profit) => {
     return sum + (profit.orders?.quantity || 0)
   }, 0)
   
-  // Calculate total deductions from orders (delivery fees + payment fees)
-  const totalOrderDeductions = profits.reduce((sum, profit) => {
+  // Calculate total deductions from completed orders (delivery fees + payment fees)
+  const totalOrderDeductions = completedOrders.reduce((sum, profit) => {
     const deliveryFees = profit.orders?.delivery_fees || 0
     const paymentFees = profit.orders?.payment_fees || 0
     return sum + deliveryFees + paymentFees
   }, 0)
   
-  // Calculate total product costs (cost per piece × quantity sold)
-  const totalProductCosts = profits.reduce((sum, profit) => {
+  // Calculate total product costs from completed orders only (cost per piece × quantity sold)
+  const totalProductCosts = completedOrders.reduce((sum, profit) => {
+    const costPerPiece = profit.orders?.products?.cost_per_piece || 0
+    return sum + (costPerPiece * (profit.orders?.quantity || 0))
+  }, 0)
+
+  // Calculate canceled order deductions (to show what was lost due to cancellations)
+  const canceledRevenue = canceledOrders.reduce((sum, profit) => {
+    return sum + (profit.orders?.total_price || 0)
+  }, 0)
+  
+  const canceledDeductions = canceledOrders.reduce((sum, profit) => {
+    const deliveryFees = profit.orders?.delivery_fees || 0
+    const paymentFees = profit.orders?.payment_fees || 0
+    return sum + deliveryFees + paymentFees
+  }, 0)
+  
+  const canceledProductCosts = canceledOrders.reduce((sum, profit) => {
     const costPerPiece = profit.orders?.products?.cost_per_piece || 0
     return sum + (costPerPiece * (profit.orders?.quantity || 0))
   }, 0)
@@ -249,21 +269,21 @@ export default function ProfitsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Orders Amount:</span>
+                <span className="text-muted-foreground">Total Orders Amount (Completed):</span>
                 <span className="font-medium text-green-600">{formatCurrency(totalRevenue)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Delivery Fees:</span>
-                <span className="font-medium text-red-600">-{formatCurrency(profits.reduce((sum, profit) => sum + (profit.orders?.delivery_fees || 0), 0))}</span>
+                <span className="text-muted-foreground">Delivery Fees (Completed):</span>
+                <span className="font-medium text-red-600">-{formatCurrency(totalOrderDeductions - completedOrders.reduce((sum, profit) => sum + (profit.orders?.payment_fees || 0), 0))}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Payment Fees:</span>
-                <span className="font-medium text-red-600">-{formatCurrency(profits.reduce((sum, profit) => sum + (profit.orders?.payment_fees || 0), 0))}</span>
+                <span className="text-muted-foreground">Payment Fees (Completed):</span>
+                <span className="font-medium text-red-600">-{formatCurrency(completedOrders.reduce((sum, profit) => sum + (profit.orders?.payment_fees || 0), 0))}</span>
               </div>
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Product Costs:</span>
+                <span className="text-muted-foreground">Product Costs (Completed):</span>
                 <span className="font-medium text-red-600">-{formatCurrency(totalProductCosts)}</span>
               </div>
               <div className="flex justify-between">
@@ -279,6 +299,45 @@ export default function ProfitsPage() {
             </div>
           </div>
         </div>
+
+        {/* Canceled Orders Information */}
+        {canceledOrders.length > 0 && (
+          <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+            <h4 className="text-sm font-medium text-red-800 dark:text-red-200 mb-3">Canceled Orders Impact</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-red-700 dark:text-red-300">Canceled Orders Count:</span>
+                  <span className="font-medium text-red-800 dark:text-red-200">{canceledOrders.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-red-700 dark:text-red-300">Lost Revenue:</span>
+                  <span className="font-medium text-red-600">-{formatCurrency(canceledRevenue)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-red-700 dark:text-red-300">Lost Delivery Fees:</span>
+                  <span className="font-medium text-red-600">-{formatCurrency(canceledDeductions - canceledOrders.reduce((sum, profit) => sum + (profit.orders?.payment_fees || 0), 0))}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-red-700 dark:text-red-300">Lost Payment Fees:</span>
+                  <span className="font-medium text-red-600">-{formatCurrency(canceledOrders.reduce((sum, profit) => sum + (profit.orders?.payment_fees || 0), 0))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-red-700 dark:text-red-300">Lost Product Costs:</span>
+                  <span className="font-medium text-red-600">-{formatCurrency(canceledProductCosts)}</span>
+                </div>
+                <div className="flex justify-between border-t border-red-300 dark:border-red-700 pt-2">
+                  <span className="font-medium text-red-800 dark:text-red-200">Total Lost Profit:</span>
+                  <span className="font-bold text-red-600">
+                    -{formatCurrency(canceledRevenue - canceledDeductions - canceledProductCosts)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         
       {/* Investor Shared Amounts */}
         <div className="bg-card border border-border rounded-lg p-6">
