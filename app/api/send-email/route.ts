@@ -63,29 +63,30 @@ export async function POST(request: NextRequest) {
     const productionDomain = process.env.NEXT_PUBLIC_APP_URL || 'https://your-domain.com'
     
     const emailBody = `
-Order Details:
-================
+📦 NEW ORDER NOTIFICATION
+========================
 
-Order Number: #${orderDetails.order_number}
-Status: ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}
-Date: ${formatDate(orderDetails.created_at)}
+Order Information:
+• Order Number: #${orderDetails.order_number}
+• Status: ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}
+• Date: ${formatDate(orderDetails.created_at)}
 
-Product Information:
-- Product: ${orderDetails.product_name}
-- Size: ${orderDetails.sizes}
-- Quantity: ${orderDetails.quantity}
-- Price per piece: ${formatCurrency(orderDetails.total_price / orderDetails.quantity)}
+Product Details:
+• Product: ${orderDetails.product_name}
+• Size: ${orderDetails.sizes}
+• Quantity: ${orderDetails.quantity}
+• Unit Price: ${formatCurrency(orderDetails.total_price / orderDetails.quantity)}
 
-Financial Details:
-- Total Price: ${formatCurrency(orderDetails.total_price)}
-- Payment Method: ${orderDetails.payment_method}
-- Payment Fees: ${formatCurrency(orderDetails.payment_fees)}
-- Delivery Fees: ${formatCurrency(orderDetails.delivery_fees)}
-- Grand Total: ${formatCurrency(orderDetails.total_price + orderDetails.payment_fees + orderDetails.delivery_fees)}
+Pricing Breakdown:
+• Product Total: ${formatCurrency(orderDetails.total_price)}
+• Payment Method: ${orderDetails.payment_method}
+• Payment Fees: ${formatCurrency(orderDetails.payment_fees)}
+• Delivery Fees: ${formatCurrency(orderDetails.delivery_fees)}
+• Grand Total: ${formatCurrency(orderDetails.total_price + orderDetails.payment_fees + orderDetails.delivery_fees)}
 
 ---
 This is an automated notification from the Trading Dashboard.
-Dashboard: ${productionDomain}
+Access your dashboard: ${productionDomain}
     `.trim()
 
     // Send email

@@ -38,6 +38,8 @@ export default function ProductsPage() {
     image_url: '',
     variants: [{ size: '', quantity: 0, price: 0, cost: 0 }]
   })
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
@@ -181,6 +183,7 @@ export default function ProductsPage() {
       image_url: '',
       variants: [{ size: '', quantity: 0, price: 0, cost: 0 }]
     });
+    setImagePreview(null);
   };
 
   const addVariant = () => {
@@ -204,6 +207,36 @@ export default function ProductsPage() {
         i === index ? { ...variant, [field]: value } : variant
       )
     }));
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingImage(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch('/api/upload-image', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setFormData(prev => ({ ...prev, image_url: result.filename }))
+        setImagePreview(URL.createObjectURL(file))
+      } else {
+        alert(result.error || 'Failed to upload image')
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error)
+      alert('Failed to upload image')
+    } finally {
+      setUploadingImage(false)
+    }
   };
 
   if (loading) {
@@ -247,7 +280,7 @@ export default function ProductsPage() {
             <div className="aspect-square relative bg-muted">
               {product.image_url ? (
                 <Image
-                  src={product.image_url.startsWith('/images/') ? product.image_url : `/images/${product.image_url}`}
+                  src={product.image_url.startsWith('/') ? product.image_url : `/images/${product.image_url}`}
                   alt={product.name}
                   fill
                   className="object-cover"
@@ -300,6 +333,7 @@ export default function ProductsPage() {
                       image_url: product.image_url,
                       variants: product.variants.map(v => ({ ...v }))
                     })
+                    setImagePreview(null) // Reset preview for editing
                     setShowAddModal(true)
                   }}
                   className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
@@ -410,18 +444,63 @@ export default function ProductsPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">
-                    Image Filename
+                    Product Image
                   </label>
-                  <input
-                    type="text"
-                    value={formData.image_url}
-                    onChange={(e) => setFormData(prev => ({ ...prev, image_url: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    placeholder="e.g., nike-new-black.jpg"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Available images: nike-new-black.jpg, nocta-black-zip.jpg, etc.
-                  </p>
+                  
+                  {/* Image Upload Section */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        Upload New Image
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        disabled={uploadingImage}
+                        className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                      />
+                      {uploadingImage && (
+                        <p className="text-xs text-blue-600 mt-1">Uploading image...</p>
+                      )}
+                    </div>
+
+                    <div className="text-center text-sm text-muted-foreground">OR</div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        Use Existing Image (Filename)
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.image_url}
+                        onChange={(e) => setFormData(prev => ({ ...prev, image_url: e.target.value }))}
+                        className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                        placeholder="e.g., nike-new-black.jpg"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Available images: nike-new-black.jpg, nocta-black-zip.jpg, etc.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Image Preview */}
+                  {(imagePreview || formData.image_url) && (
+                    <div className="mt-3">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        Preview
+                      </label>
+                      <div className="w-32 h-32 border border-border rounded-md overflow-hidden bg-muted">
+                        <Image
+                          src={imagePreview || (formData.image_url.startsWith('/images/') ? formData.image_url : `/images/${formData.image_url}`)}
+                          alt="Product preview"
+                          width={128}
+                          height={128}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -440,51 +519,74 @@ export default function ProductsPage() {
                   
                   <div className="space-y-3">
                     {formData.variants.map((variant, index) => (
-                      <div key={index} className="grid grid-cols-4 gap-2 p-3 border border-border rounded-md">
-                        <input
-                          type="text"
-                          placeholder="Size"
-                          value={variant.size}
-                          onChange={(e) => updateVariant(index, 'size', e.target.value)}
-                          className="px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                          required
-                        />
-                        <input
-                          type="number"
-                          placeholder="Quantity"
-                          value={variant.quantity}
-                          onChange={(e) => updateVariant(index, 'quantity', parseInt(e.target.value))}
-                          className="px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                          required
-                        />
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Price (AED)"
-                          value={variant.price}
-                          onChange={(e) => updateVariant(index, 'price', parseFloat(e.target.value))}
-                          className="px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                          required
-                        />
-                        <div className="flex gap-1">
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Cost (AED)"
-                            value={variant.cost}
-                            onChange={(e) => updateVariant(index, 'cost', parseFloat(e.target.value))}
-                            className="flex-1 px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                            required
-                          />
-                          {formData.variants.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeVariant(index)}
-                              className="px-2 py-1 text-red-600 hover:bg-red-100 rounded text-sm"
-                            >
-                              ×
-                            </button>
-                          )}
+                      <div key={index} className="p-3 border border-border rounded-md">
+                        <div className="grid grid-cols-4 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">
+                              Size
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g., S, M, L"
+                              value={variant.size}
+                              onChange={(e) => updateVariant(index, 'size', e.target.value)}
+                              className="w-full px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">
+                              Quantity
+                            </label>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={variant.quantity}
+                              onChange={(e) => updateVariant(index, 'quantity', parseInt(e.target.value))}
+                              className="w-full px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">
+                              Price (AED)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={variant.price}
+                              onChange={(e) => updateVariant(index, 'price', parseFloat(e.target.value))}
+                              className="w-full px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">
+                              Cost (AED)
+                            </label>
+                            <div className="flex gap-1">
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={variant.cost}
+                                onChange={(e) => updateVariant(index, 'cost', parseFloat(e.target.value))}
+                                className="flex-1 px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                                required
+                              />
+                              {formData.variants.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeVariant(index)}
+                                  className="px-2 py-1 text-red-600 hover:bg-red-100 rounded text-sm"
+                                  title="Remove variant"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))}
