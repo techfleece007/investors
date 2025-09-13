@@ -474,13 +474,25 @@ export default function ProductsPage() {
                       <input
                         type="text"
                         value={formData.image_url}
-                        onChange={(e) => setFormData(prev => ({ ...prev, image_url: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, image_url: e.target.value }))
+                          setImagePreview(null) // Clear preview when manually typing
+                        }}
                         className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
                         placeholder="e.g., nike-new-black.jpg"
                       />
                       <p className="text-xs text-muted-foreground mt-1">
                         Available images: nike-new-black.jpg, nocta-black-zip.jpg, etc.
                       </p>
+                      {formData.image_url && (
+                        <button
+                          type="button"
+                          onClick={() => setImagePreview(null)} // This will trigger the preview to show
+                          className="mt-2 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                        >
+                          Preview Image
+                        </button>
+                      )}
                     </div>
                   </div>
 

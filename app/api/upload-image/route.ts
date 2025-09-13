@@ -31,7 +31,8 @@ export async function POST(request: NextRequest) {
     // Generate unique filename
     const timestamp = Date.now()
     const fileExtension = file.name.split('.').pop()
-    const fileName = `${timestamp}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const fileName = `${timestamp}-${sanitizedName}`
     
     // Ensure images directory exists
     const imagesDir = join(process.cwd(), 'public', 'images')
@@ -56,7 +57,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error uploading image:', error)
     return NextResponse.json({ 
-      error: 'Failed to upload image' 
+      error: 'Failed to upload image',
+      details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 })
   }
 }

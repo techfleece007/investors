@@ -465,7 +465,7 @@ export default function ShipmentsPage() {
           }}
         >
           <div 
-            className="bg-card border border-border rounded-lg shadow-xl max-w-md w-full"
+            className="bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto mx-2 sm:mx-0"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center p-6 border-b border-border">
@@ -487,124 +487,126 @@ export default function ShipmentsPage() {
             <div className="p-6">
               
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    placeholder="Enter shipment name"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Cost
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2 text-muted-foreground">AED</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Name
+                    </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.cost}
-                      onChange={(e) => setFormData(prev => ({ ...prev, cost: parseFloat(e.target.value) || 0 }))}
-                      className="w-full pl-12 pr-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                      placeholder="0.00"
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      placeholder="Enter shipment name"
                       required
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Details
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.details}
-                    onChange={(e) => setFormData(prev => ({ ...prev, details: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    placeholder="Enter shipment details (e.g., quantity, items)"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Cost
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-muted-foreground">AED</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.cost}
+                        onChange={(e) => setFormData(prev => ({ ...prev, cost: parseFloat(e.target.value) || 0 }))}
+                        className="w-full pl-12 pr-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                        placeholder="0.00"
+                        required
+                      />
+                    </div>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Paid By
-                  </label>
-                  <select
-                    value={formData.paid_by}
-                    onChange={(e) => setFormData(prev => ({ ...prev, paid_by: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    required
-                  >
-                    <option value="">Select an investor</option>
-                    {investors.map((investor) => (
-                      <option key={investor.id} value={investor.id}>
-                        {investor.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Details
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.details}
+                      onChange={(e) => setFormData(prev => ({ ...prev, details: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      placeholder="Enter shipment details (e.g., quantity, items)"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    required
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Paid By
+                    </label>
+                    <select
+                      value={formData.paid_by}
+                      onChange={(e) => setFormData(prev => ({ ...prev, paid_by: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    >
+                      <option value="">Select an investor</option>
+                      {investors.map((investor) => (
+                        <option key={investor.id} value={investor.id}>
+                          {investor.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Tracking Number
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.tracking_number}
-                    onChange={(e) => setFormData(prev => ({ ...prev, tracking_number: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    placeholder="Enter tracking number"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Destination
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.destination}
-                    onChange={(e) => setFormData(prev => ({ ...prev, destination: e.target.value }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    placeholder="Enter destination address"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Tracking Number
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.tracking_number}
+                      onChange={(e) => setFormData(prev => ({ ...prev, tracking_number: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      placeholder="Enter tracking number"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Status
-                  </label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value as 'pending' | 'shipped' | 'delivered' }))}
-                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    required
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="shipped">Shipped</option>
-                    <option value="delivered">Delivered</option>
-                  </select>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Destination
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.destination}
+                      onChange={(e) => setFormData(prev => ({ ...prev, destination: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      placeholder="Enter destination address"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Status
+                    </label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value as 'pending' | 'shipped' | 'delivered' }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="shipped">Shipped</option>
+                      <option value="delivered">Delivered</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="flex gap-3 pt-4">
