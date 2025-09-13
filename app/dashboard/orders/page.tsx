@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter } from 'lucide-react'
 import { calculatePaymentFees } from '@/lib/utils/paymentFees'
-import { sendOrderNotification } from '@/lib/utils/email'
+import { sendOrderEmail } from '@/lib/utils/order-email'
 
 interface Order {
   id: string
@@ -383,22 +383,26 @@ export default function OrdersPage() {
         // Each product gets its own row with its specific size and quantity
       }
 
-      // Send email notification for new order
+      // Send email notification for new order (one email with all items)
       try {
-        for (const item of orderItems) {
-          await sendOrderNotification({
-            order_number: orderNumber,
-            status: 'completed',
-            product_name: item.product_name,
-            sizes: item.size,
-            quantity: item.quantity,
-            total_price: item.total_price,
-            payment_method: formData.payment_method,
-            payment_fees: formData.payment_fees / orderItems.length,
-            delivery_fees: formData.delivery_fees / orderItems.length,
-            created_at: new Date().toISOString()
-          })
-        }
+        const orderItemsForEmail = orderItems.map(item => ({
+          product_name: item.product_name,
+          size: item.size,
+          quantity: item.quantity,
+          unit_price: item.total_price / item.quantity,
+          total_price: item.total_price
+        }))
+
+        await sendOrderEmail({
+          order_number: orderNumber,
+          shipping_number: shippingNumber,
+          status: formData.status,
+          items: orderItemsForEmail,
+          payment_method: formData.payment_method,
+          payment_fees: formData.payment_fees,
+          delivery_fees: formData.delivery_fees,
+          created_at: new Date().toISOString()
+        })
       } catch (emailError) {
         console.error('Error sending email notification:', emailError)
         // Don't fail the order creation if email fails
@@ -524,20 +528,24 @@ export default function OrdersPage() {
 
         // Send email notification for status changes
         try {
-          for (const orderItem of orderData) {
-            await sendOrderNotification({
-              order_number: orderItem.order_number,
-              status: newStatus,
-              product_name: (orderItem.products as any)?.name || 'Unknown Product',
-              sizes: orderItem.sizes,
-              quantity: orderItem.quantity,
-              total_price: orderItem.total_price,
-              payment_method: orderItem.payment_method,
-              payment_fees: orderItem.payment_fees,
-              delivery_fees: orderItem.delivery_fees,
-              created_at: orderItem.created_at
-            })
-          }
+          const orderItemsForEmail = orderData.map(item => ({
+            product_name: (item.products as any)?.name || 'Unknown Product',
+            size: item.sizes,
+            quantity: item.quantity,
+            unit_price: item.total_price / item.quantity,
+            total_price: item.total_price
+          }))
+
+          await sendOrderEmail({
+            order_number: orderData[0].order_number,
+            shipping_number: orderData[0].shipping_number,
+            status: newStatus,
+            items: orderItemsForEmail,
+            payment_method: orderData[0].payment_method,
+            payment_fees: orderData[0].payment_fees,
+            delivery_fees: orderData[0].delivery_fees,
+            created_at: orderData[0].created_at
+          })
         } catch (emailError) {
           console.error('Error sending email notification:', emailError)
           // Don't fail the order update if email fails
