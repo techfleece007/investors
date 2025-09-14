@@ -141,8 +141,8 @@ trading-dashboard/
 │   ├── (auth)/                  # Authentication routes
 │   │   └── login/               # Login page
 │   ├── api/                     # API routes
-│   │   └── send-email/          # Email notification API
-│   │       └── route.ts         # Email sending endpoint
+│   │   └── send-order-email/    # Order email notification API
+│   │       └── route.ts         # Order email sending endpoint
 │   ├── dashboard/               # Dashboard routes
 │   │   ├── layout.tsx           # Dashboard layout with sidebar
 │   │   ├── page.tsx             # Products page (main dashboard)

@@ -24,341 +24,163 @@ export async function POST(request: NextRequest) {
   try {
     const orderDetails: OrderEmailDetails = await request.json()
 
-    // Validate environment variables
     if (!process.env.EMAIL_PASSWORD) {
       console.error('EMAIL_PASSWORD environment variable is not set')
       return NextResponse.json({ success: false, error: 'Email configuration missing' }, { status: 500 })
     }
 
-    // Create transporter using Gmail SMTP
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: 'prvyit@gmail.com',
-        pass: process.env.EMAIL_PASSWORD
+        pass: process.env.EMAIL_PASSWORD,
       },
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 100,
-      rateDelta: 20000,
-      rateLimit: 5
     })
 
-    // Format the order details for email
-    const formatCurrency = (amount: number) => {
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'AED'
-      }).format(amount)
-    }
+    const formatCurrency = (amount: number) =>
+      new Intl.NumberFormat('en-US', { style: 'currency', currency: 'AED' }).format(amount)
 
-    const formatDate = (dateString: string) => {
-      return new Date(dateString).toLocaleString('en-US', {
+    const formatDate = (dateString: string) =>
+      new Date(dateString).toLocaleString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
       })
-    }
 
-    const statusEmoji = {
-      'completed': '✅',
-      'pending': '⏳',
-      'cancelled': '❌',
-      'canceled': '❌',
-      'shipped': '🚚',
-      'delivered': '📦'
-    }
-
-    const statusColor = {
-      'completed': '#10B981',
-      'pending': '#F59E0B',
-      'cancelled': '#EF4444',
-      'canceled': '#EF4444',
-      'shipped': '#3B82F6',
-      'delivered': '#10B981'
+    const statusEmoji: Record<string, string> = {
+      completed: '✅',
+      pending: '⏳',
+      cancelled: '❌',
+      canceled: '❌',
+      shipped: '🚚',
+      delivered: '📦',
     }
 
     const totalProducts = orderDetails.items.length
     const totalQuantity = orderDetails.items.reduce((sum, item) => sum + item.quantity, 0)
     const subtotal = orderDetails.items.reduce((sum, item) => sum + item.total_price, 0)
-    const grandTotal = subtotal + orderDetails.payment_fees + orderDetails.delivery_fees
 
-    const emailSubject = `Order ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)} - #${orderDetails.order_number}`
-    
-    // Get production domain from environment or use default
+    const emailSubject = `Order ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)} - #${
+      orderDetails.order_number
+    }`
+
     const productionDomain = process.env.NEXT_PUBLIC_APP_URL || 'https://your-domain.com'
-    
+
     const htmlEmailBody = `
     <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Order ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}</title>
-        <style>
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                line-height: 1.6;
-                color: #333;
-                background-color: #f8fafc;
-                margin: 0;
-                padding: 0;
-            }
-            .container {
-                max-width: 600px;
-                margin: 0 auto;
-                background-color: #ffffff;
-                border-radius: 12px;
-                overflow: hidden;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 30px;
-                text-align: center;
-            }
-            .header h1 {
-                margin: 0;
-                font-size: 28px;
-                font-weight: 700;
-            }
-            .header .order-number {
-                font-size: 18px;
-                margin-top: 8px;
-                opacity: 0.9;
-            }
-            .content {
-                padding: 30px;
-            }
-            .status-badge {
-                display: inline-block;
-                padding: 8px 16px;
-                border-radius: 20px;
-                font-weight: 600;
-                font-size: 14px;
-                margin-bottom: 20px;
-            }
-            .section {
-                margin-bottom: 25px;
-            }
-            .section-title {
-                font-size: 18px;
-                font-weight: 600;
-                color: #2d3748;
-                margin-bottom: 15px;
-                padding-bottom: 8px;
-                border-bottom: 2px solid #e2e8f0;
-            }
-            .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            .info-item {
-                display: flex;
-                flex-direction: column;
-            }
-            .info-label {
-                font-size: 12px;
-                color: #718096;
-                text-transform: uppercase;
-                font-weight: 600;
-                margin-bottom: 4px;
-            }
-            .info-value {
-                font-size: 16px;
-                color: #2d3748;
-                font-weight: 500;
-            }
-            .product-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 20px;
-            }
-            .product-table th {
-                background-color: #f7fafc;
-                color: #4a5568;
-                font-weight: 600;
-                padding: 12px;
-                text-align: left;
-                border-bottom: 2px solid #e2e8f0;
-            }
-            .product-table td {
-                padding: 12px;
-                border-bottom: 1px solid #e2e8f0;
-            }
-            .product-table tr:nth-child(even) {
-                background-color: #f8fafc;
-            }
-            .summary-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-top: 20px;
-            }
-            .summary-item {
-                display: flex;
-                justify-content: space-between;
-                padding: 8px 0;
-                border-bottom: 1px solid #e2e8f0;
-            }
-            .summary-item.total {
-                font-weight: 700;
-                font-size: 18px;
-                color: #2d3748;
-                border-top: 2px solid #e2e8f0;
-                border-bottom: none;
-                padding-top: 12px;
-                margin-top: 8px;
-            }
-            .footer {
-                background-color: #f8fafc;
-                padding: 20px 30px;
-                text-align: center;
-                color: #718096;
-                font-size: 14px;
-            }
-            .footer a {
-                color: #667eea;
-                text-decoration: none;
-            }
-            @media (max-width: 600px) {
-                .info-grid, .summary-grid {
-                    grid-template-columns: 1fr;
-                }
-                .container {
-                    margin: 10px;
-                }
-                .content {
-                    padding: 20px;
-                }
-            }
-        </style>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${emailSubject}</title>
     </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>${statusEmoji[orderDetails.status as keyof typeof statusEmoji] || '📦'} Order ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}</h1>
-                <div class="order-number">Order #${orderDetails.order_number}</div>
-            </div>
-            
-            <div class="content">
-                <div class="status-badge" style="background-color: ${statusColor[orderDetails.status as keyof typeof statusColor] || '#6B7280'}; color: white;">
-                    ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}
-                </div>
+    <body style="margin:0;padding:0;background-color:#f8fafc;font-family:Arial,Helvetica,sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;padding:20px 0;">
+        <tr>
+          <td align="center">
+            <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+              
+              <!-- Header -->
+              <tr>
+                <td align="center" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:30px;color:#fff;">
+                  <h1 style="margin:0;font-size:24px;font-weight:bold;">
+                    ${statusEmoji[orderDetails.status.toLowerCase()] || '📦'} 
+                    Order ${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}
+                  </h1>
+                  <p style="margin:8px 0 0;font-size:16px;">Order #${orderDetails.order_number}</p>
+                </td>
+              </tr>
 
-                <div class="section">
-                    <div class="section-title">Order Information</div>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <div class="info-label">Order Number</div>
-                            <div class="info-value">#${orderDetails.order_number}</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Shipping Number</div>
-                            <div class="info-value">#${orderDetails.shipping_number}</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Status</div>
-                            <div class="info-value">${orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1)}</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Date</div>
-                            <div class="info-value">${formatDate(orderDetails.created_at)}</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Payment Method</div>
-                            <div class="info-value">${orderDetails.payment_method}</div>
-                        </div>
-                    </div>
-                </div>
+              <!-- Content -->
+              <tr>
+                <td style="padding:30px;">
 
-                <div class="section">
-                    <div class="section-title">Product Details</div>
-                    <table class="product-table">
-                        <thead>
-                            <tr>
-                                <th>Product</th>
-                                <th>Size</th>
-                                <th>Quantity</th>
-                                <th>Unit Price</th>
-                                <th>Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${orderDetails.items.map(item => `
-                                <tr>
-                                    <td>${item.product_name}</td>
-                                    <td>${item.size}</td>
-                                    <td>${item.quantity}</td>
-                                    <td>${formatCurrency(item.unit_price)}</td>
-                                    <td>${formatCurrency(item.total_price)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
+                  <!-- Order Info -->
+                  <h2 style="margin:0 0 15px;font-size:18px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">Order Information</h2>
+                  <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;margin-bottom:20px;">
+                    <tr><td style="font-weight:bold;width:40%;">Order Number</td><td>#${orderDetails.order_number}</td></tr>
+                    <tr><td style="font-weight:bold;">Shipping Number</td><td>#${orderDetails.shipping_number}</td></tr>
+                    <tr><td style="font-weight:bold;">Status</td><td>${orderDetails.status}</td></tr>
+                    <tr><td style="font-weight:bold;">Date</td><td>${formatDate(orderDetails.created_at)}</td></tr>
+                    <tr><td style="font-weight:bold;">Payment Method</td><td>${orderDetails.payment_method}</td></tr>
+                  </table>
 
-                <div class="section">
-                    <div class="section-title">Order Summary</div>
-                    <div class="summary-grid">
-                        <div>
-                            <div class="summary-item">
-                                <span>Total Products:</span>
-                                <span>${totalProducts}</span>
-                            </div>
-                            <div class="summary-item">
-                                <span>Total Quantity:</span>
-                                <span>${totalQuantity}</span>
-                            </div>
-                            <div class="summary-item">
-                                <span>Subtotal:</span>
-                                <span>${formatCurrency(subtotal)}</span>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="summary-item">
-                                <span>Payment Fees:</span>
-                                <span>${formatCurrency(orderDetails.payment_fees)}</span>
-                            </div>
-                            <div class="summary-item">
-                                <span>Delivery Fees:</span>
-                                <span>${formatCurrency(orderDetails.delivery_fees)}</span>
-                            </div>
-                            <div class="summary-item total">
-                                <span>Total Order Value:</span>
-                                <span>${formatCurrency(grandTotal)}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                  <!-- Product Details -->
+                  <h2 style="margin:0 0 15px;font-size:18px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">Product Details</h2>
+                  <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;margin-bottom:20px;">
+                    <thead>
+                      <tr style="background:#f7fafc;">
+                        <th align="left" style="border-bottom:2px solid #e2e8f0;">Product</th>
+                        <th align="left" style="border-bottom:2px solid #e2e8f0;">Size</th>
+                        <th align="left" style="border-bottom:2px solid #e2e8f0;">Qty</th>
+                        <th align="left" style="border-bottom:2px solid #e2e8f0;">Unit Price</th>
+                        <th align="left" style="border-bottom:2px solid #e2e8f0;">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${orderDetails.items
+                        .map(
+                          (item) => `
+                        <tr>
+                          <td>${item.product_name}</td>
+                          <td>${item.size}</td>
+                          <td>${item.quantity}</td>
+                          <td>${formatCurrency(item.unit_price)}</td>
+                          <td>${formatCurrency(item.total_price)}</td>
+                        </tr>`
+                        )
+                        .join('')}
+                    </tbody>
+                  </table>
 
-            <div class="footer">
-                <p>This is an automated notification from the Trading Dashboard.</p>
-                <p><a href="${productionDomain}">Access your dashboard</a></p>
-            </div>
-        </div>
+                  <!-- Summary -->
+                  <h2 style="margin:0 0 15px;font-size:18px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">Order Summary</h2>
+                  <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;">
+                    <tr><td>Total Products:</td><td align="right">${totalProducts}</td></tr>
+                    <tr><td>Total Quantity:</td><td align="right">${totalQuantity}</td></tr>
+                    <tr><td>Subtotal:</td><td align="right">${formatCurrency(subtotal)}</td></tr>
+                    <tr><td>Payment Fees:</td><td align="right">${formatCurrency(orderDetails.payment_fees)}</td></tr>
+                    <tr><td>Delivery Fees:</td><td align="right">${formatCurrency(orderDetails.delivery_fees)}</td></tr>
+                    <tr style="font-weight:bold;font-size:16px;border-top:2px solid #e2e8f0;">
+                      <td>Total Order Value:</td><td align="right">${formatCurrency(subtotal)}</td>
+                    </tr>
+                  </table>
+
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td align="center" style="background:#f8fafc;padding:20px;color:#718096;font-size:14px;">
+                  <p style="margin:0;">This is an automated notification from the Trading Dashboard.</p>
+                  <p style="margin:5px 0 0;"><a href="${productionDomain}" style="color:#667eea;text-decoration:none;">Access your dashboard</a></p>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
     </body>
     </html>
     `.trim()
 
-    // Send email
     const info = await transporter.sendMail({
       from: 'prvyit@gmail.com',
       to: 'qudaih.tamer@gmail.com',
       subject: emailSubject,
-      html: htmlEmailBody
+      html: htmlEmailBody,
     })
 
     console.log('Email sent successfully:', info.messageId)
     return NextResponse.json({ success: true, messageId: info.messageId })
   } catch (error) {
     console.error('Error sending email:', error)
-    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
   }
 }
