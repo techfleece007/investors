@@ -34,14 +34,32 @@ export default function DashboardLayout({
 
   useEffect(() => {
     checkUser()
-  }, [])
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          router.push('/login')
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          setUser(session.user)
+        }
+      }
+    )
+
+    return () => subscription.unsubscribe()
+  }, [router, supabase.auth])
 
   const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+      } else {
+        setUser(user)
+      }
+    } catch (error) {
+      console.error('Error checking user:', error)
       router.push('/login')
-    } else {
-      setUser(user)
     }
   }
 

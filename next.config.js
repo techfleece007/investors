@@ -57,6 +57,16 @@ const nextConfig = {
           },
         ],
       },
+      // Add cache control for images
+      {
+        source: '/images/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
     ];
   },
   // Add experimental features for better network handling

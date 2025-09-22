@@ -227,7 +227,8 @@ export default function ProductsPage() {
 
       if (result.success) {
         setFormData(prev => ({ ...prev, image_url: result.filename }))
-        setImagePreview(URL.createObjectURL(file))
+        // Use the cache-busted URL for immediate visibility
+        setImagePreview(result.imageUrl || URL.createObjectURL(file))
       } else {
         alert(result.error || 'Failed to upload image')
       }
@@ -284,6 +285,7 @@ export default function ProductsPage() {
                   alt={product.name}
                   fill
                   className="object-cover"
+                  unoptimized={true}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
@@ -509,6 +511,7 @@ export default function ProductsPage() {
                           width={128}
                           height={128}
                           className="w-full h-full object-cover"
+                          unoptimized={true}
                         />
                       </div>
                     </div>

@@ -47,10 +47,11 @@ export async function POST(request: NextRequest) {
     
     await writeFile(filePath, buffer)
 
-    // Return the filename for database storage
+    // Return the filename for database storage with cache-busting
     return NextResponse.json({ 
       success: true, 
       filename: fileName,
+      imageUrl: `/images/${fileName}?t=${timestamp}`,
       message: 'Image uploaded successfully' 
     })
 

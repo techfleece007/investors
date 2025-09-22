@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:refresh": "node scripts/dev-with-refresh.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
