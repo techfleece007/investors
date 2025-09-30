@@ -9,6 +9,7 @@ import {
   Truck, 
   DollarSign, 
   TrendingUp, 
+  FileText,
   Menu, 
   X,
   LogOut
@@ -20,6 +21,7 @@ const navigation = [
   { name: 'Shipments', href: '/dashboard/shipments', icon: Truck },
   { name: 'Expenses', href: '/dashboard/expenses', icon: DollarSign },
   { name: 'Profits', href: '/dashboard/profits', icon: TrendingUp },
+  { name: 'Notes', href: '/dashboard/notes', icon: FileText },
 ]
 
 export default function DashboardLayout({

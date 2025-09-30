@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { TrendingUp, DollarSign } from 'lucide-react'
+import DateFilter from '@/components/DateFilter'
 
 interface Profit {
   id: string
@@ -36,9 +37,15 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
 
 export default function ProfitsPage() {
   const [profits, setProfits] = useState<Profit[]>([])
+  const [filteredProfits, setFilteredProfits] = useState<Profit[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [shipments, setShipments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [filters, setFilters] = useState({
+    dateFilter: 'all' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    customDateFrom: '',
+    customDateTo: ''
+  })
   const supabase = createClient()
 
   useEffect(() => {
@@ -46,6 +53,10 @@ export default function ProfitsPage() {
     fetchExpenses()
     fetchShipments()
   }, [])
+
+  useEffect(() => {
+    applyFilters()
+  }, [profits, filters])
 
   const fetchProfits = async () => {
     try {
@@ -129,8 +140,55 @@ export default function ProfitsPage() {
     }
   }
 
+  const applyFilters = () => {
+    let filtered = [...profits]
+
+    // Filter by date
+    if (filters.dateFilter !== 'all') {
+      const now = new Date()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      
+      filtered = filtered.filter(profit => {
+        const profitDate = new Date(profit.created_at)
+        
+        switch (filters.dateFilter) {
+          case 'today':
+            return profitDate >= today
+          case 'week':
+            const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+            return profitDate >= weekAgo
+          case 'month':
+            const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+            return profitDate >= monthAgo
+          case 'year':
+            const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
+            return profitDate >= yearAgo
+          case 'custom':
+            if (filters.customDateFrom && filters.customDateTo) {
+              const fromDate = new Date(filters.customDateFrom)
+              const toDate = new Date(filters.customDateTo)
+              toDate.setHours(23, 59, 59, 999) // Include the entire end date
+              return profitDate >= fromDate && profitDate <= toDate
+            }
+            return true
+          default:
+            return true
+        }
+      })
+    }
+
+    setFilteredProfits(filtered)
+  }
+
+  const handleFilterChange = (filterType: string, value: string) => {
+    setFilters(prev => ({
+      ...prev,
+      [filterType]: value
+    }))
+  }
+
   // Group orders by order_number to count unique orders
-  const uniqueOrders = profits.reduce((acc, profit) => {
+  const uniqueOrders = filteredProfits.reduce((acc, profit) => {
     const orderNumber = profit.orders?.order_number
     if (orderNumber && !acc[orderNumber]) {
       acc[orderNumber] = profit.orders
@@ -139,8 +197,8 @@ export default function ProfitsPage() {
   }, {} as Record<number, any>)
 
   // Separate completed and canceled orders
-  const completedOrders = profits.filter(profit => profit.orders?.status === 'completed')
-  const canceledOrders = profits.filter(profit => profit.orders?.status === 'canceled')
+  const completedOrders = filteredProfits.filter(profit => profit.orders?.status === 'completed')
+  const canceledOrders = filteredProfits.filter(profit => profit.orders?.status === 'canceled')
 
   // Calculate total revenue from completed orders only
   const totalRevenue = completedOrders.reduce((sum, profit) => {
@@ -231,6 +289,16 @@ export default function ProfitsPage() {
           <h1 className="text-2xl font-bold text-foreground">Profits</h1>
           <p className="text-muted-foreground">Track your profit distribution and performance</p>
         </div>
+
+        {/* Date Filter */}
+        <DateFilter
+          dateFilter={filters.dateFilter}
+          customDateFrom={filters.customDateFrom}
+          customDateTo={filters.customDateTo}
+          onFilterChange={handleFilterChange}
+          totalCount={profits.length}
+          filteredCount={filteredProfits.length}
+        />
 
       {/* Orders Summary */}
       <div className="bg-card border border-border rounded-lg p-6">

@@ -2,25 +2,26 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Edit, Trash2, DollarSign, Calendar, Tag } from 'lucide-react'
+import { Plus, Edit, Trash2, FileText, Calendar, Hash, X } from 'lucide-react'
 import DateFilter from '@/components/DateFilter'
 
-interface Expense {
+interface Note {
   id: string
   details: string
-  amount: number
-  paid_by: string
-  investor_name?: string
+  reference_number: string
+  date: string
   created_at: string
   updated_at: string
 }
 
-export default function ExpensesPage() {
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [filteredExpenses, setFilteredExpenses] = useState<Expense[]>([])
+export default function NotesPage() {
+  const [notes, setNotes] = useState<Note[]>([])
+  const [filteredNotes, setFilteredNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
+  const [editingNote, setEditingNote] = useState<Note | null>(null)
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
   const [filters, setFilters] = useState({
     dateFilter: 'all' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
     customDateFrom: '',
@@ -28,92 +29,64 @@ export default function ExpensesPage() {
   })
   const [formData, setFormData] = useState({
     details: '',
-    amount: 0,
-    paid_by: ''
+    reference_number: '',
+    date: new Date().toISOString().split('T')[0]
   })
   const supabase = createClient()
 
-  const [investors, setInvestors] = useState<{id: string, name: string}[]>([])
-
   useEffect(() => {
-    fetchExpenses()
-    fetchInvestors()
+    fetchNotes()
   }, [])
 
   useEffect(() => {
     applyFilters()
-  }, [expenses, filters])
+  }, [notes, filters])
 
-  const fetchExpenses = async () => {
+  const fetchNotes = async () => {
     try {
       const { data, error } = await supabase
-        .from('expenses')
-        .select(`
-          *,
-          investors (
-            name
-          )
-        `)
+        .from('notes')
+        .select('*')
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      
-      const transformedExpenses = data.map(expense => ({
-        ...expense,
-        investor_name: expense.investors?.name || 'Unknown'
-      }))
-      
-      setExpenses(transformedExpenses)
+      setNotes(data || [])
     } catch (error) {
-      console.error('Error fetching expenses:', error)
+      console.error('Error fetching notes:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchInvestors = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('investors')
-        .select('id, name')
-        .order('name')
-
-      if (error) throw error
-      setInvestors(data)
-    } catch (error) {
-      console.error('Error fetching investors:', error)
-    }
-  }
-
   const applyFilters = () => {
-    let filtered = [...expenses]
+    let filtered = [...notes]
 
     // Filter by date
     if (filters.dateFilter !== 'all') {
       const now = new Date()
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
       
-      filtered = filtered.filter(expense => {
-        const expenseDate = new Date(expense.created_at)
+      filtered = filtered.filter(note => {
+        const noteDate = new Date(note.date)
         
         switch (filters.dateFilter) {
           case 'today':
-            return expenseDate >= today
+            return noteDate >= today
           case 'week':
             const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
-            return expenseDate >= weekAgo
+            return noteDate >= weekAgo
           case 'month':
             const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
-            return expenseDate >= monthAgo
+            return noteDate >= monthAgo
           case 'year':
             const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
-            return expenseDate >= yearAgo
+            return noteDate >= yearAgo
           case 'custom':
             if (filters.customDateFrom && filters.customDateTo) {
               const fromDate = new Date(filters.customDateFrom)
               const toDate = new Date(filters.customDateTo)
               toDate.setHours(23, 59, 59, 999) // Include the entire end date
-              return expenseDate >= fromDate && expenseDate <= toDate
+              return noteDate >= fromDate && noteDate <= toDate
             }
             return true
           default:
@@ -122,7 +95,7 @@ export default function ExpensesPage() {
       })
     }
 
-    setFilteredExpenses(filtered)
+    setFilteredNotes(filtered)
   }
 
   const handleFilterChange = (filterType: string, value: string) => {
@@ -136,59 +109,82 @@ export default function ExpensesPage() {
     e.preventDefault()
     
     try {
-      if (editingExpense) {
+      if (editingNote) {
         const { error } = await supabase
-          .from('expenses')
+          .from('notes')
           .update({
             details: formData.details,
-            amount: formData.amount,
-            paid_by: formData.paid_by
+            reference_number: formData.reference_number,
+            date: formData.date
           })
-          .eq('id', editingExpense.id)
+          .eq('id', editingNote.id)
 
         if (error) throw error
+        setSuccessMessage('Note updated successfully!')
       } else {
         const { error } = await supabase
-          .from('expenses')
+          .from('notes')
           .insert({
             details: formData.details,
-            amount: formData.amount,
-            paid_by: formData.paid_by
+            reference_number: formData.reference_number,
+            date: formData.date
           })
 
         if (error) throw error
+        setSuccessMessage('Note created successfully!')
       }
 
       setShowAddModal(false)
-      setEditingExpense(null)
+      setEditingNote(null)
       resetForm()
-      fetchExpenses()
+      fetchNotes()
+      setShowSuccess(true)
+      
+      // Hide success message after 3 seconds
+      setTimeout(() => setShowSuccess(false), 3000)
     } catch (error) {
-      console.error('Error saving expense:', error)
+      console.error('Error saving note:', error)
+      alert('Error saving note. Please try again.')
     }
   }
 
-  const handleDelete = async (expenseId: string) => {
-    if (confirm('Are you sure you want to delete this expense?')) {
+  const handleDelete = async (noteId: string) => {
+    if (confirm('Are you sure you want to delete this note?')) {
       try {
         const { error } = await supabase
-          .from('expenses')
+          .from('notes')
           .delete()
-          .eq('id', expenseId)
+          .eq('id', noteId)
 
         if (error) throw error
-        fetchExpenses()
+        setSuccessMessage('Note deleted successfully!')
+        fetchNotes()
+        setShowSuccess(true)
+        
+        // Hide success message after 3 seconds
+        setTimeout(() => setShowSuccess(false), 3000)
       } catch (error) {
-        console.error('Error deleting expense:', error)
+        console.error('Error deleting note:', error)
+        alert('Error deleting note. Please try again.')
       }
     }
+  }
+
+  const handleEdit = (note: Note) => {
+    setEditingNote(note)
+    setFormData({
+      details: note.details,
+      reference_number: note.reference_number,
+      date: note.date
+    })
+    setShowAddModal(true)
   }
 
   const resetForm = () => {
     setFormData({
       details: '',
-      amount: 0,
-      paid_by: ''
+      reference_number: '',
+      date: new Date().toISOString().split('T')[0]
     })
   }
 
@@ -200,7 +196,15 @@ export default function ExpensesPage() {
     })
   }
 
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
 
   if (loading) {
     return (
@@ -214,45 +218,47 @@ export default function ExpensesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Expenses</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">Track your business expenses and costs</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Notes</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">Manage your business notes and references</p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => {
+            setShowAddModal(true)
+            setEditingNote(null)
+            resetForm()
+          }}
           className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
         >
           <Plus className="mr-2 h-4 w-4" />
-          Add Expense
+          Add Note
         </button>
       </div>
+
+      {/* Success Notification */}
+      {showSuccess && (
+        <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-in slide-in-from-right-2">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            <span>{successMessage}</span>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         <div className="bg-card border border-border rounded-lg p-4 sm:p-6">
           <div className="flex items-center">
-            <div className="p-2 bg-red-500/10 rounded-lg">
-              <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-red-500" />
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500" />
             </div>
             <div className="ml-3 sm:ml-4">
-              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Expenses</p>
-              <p className="text-lg sm:text-2xl font-bold text-foreground">AED {totalExpenses.toFixed(2)}</p>
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Notes</p>
+              <p className="text-lg sm:text-2xl font-bold text-foreground">{notes.length}</p>
             </div>
           </div>
         </div>
         
         <div className="bg-card border border-border rounded-lg p-4 sm:p-6">
-          <div className="flex items-center">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Tag className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500" />
-            </div>
-            <div className="ml-3 sm:ml-4">
-              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Records</p>
-              <p className="text-lg sm:text-2xl font-bold text-foreground">{expenses.length}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-card border border-border rounded-lg p-4 sm:p-6 sm:col-span-2 lg:col-span-1">
           <div className="flex items-center">
             <div className="p-2 bg-green-500/10 rounded-lg">
               <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-green-500" />
@@ -260,53 +266,33 @@ export default function ExpensesPage() {
             <div className="ml-3 sm:ml-4">
               <p className="text-xs sm:text-sm font-medium text-muted-foreground">This Month</p>
               <p className="text-lg sm:text-2xl font-bold text-foreground">
-                AED {expenses
-                  .filter(expense => {
-                    const expenseDate = new Date(expense.created_at)
-                    const now = new Date()
-                    return expenseDate.getMonth() === now.getMonth() && 
-                           expenseDate.getFullYear() === now.getFullYear()
-                  })
-                  .reduce((sum, expense) => sum + expense.amount, 0)
-                  .toFixed(2)}
+                {notes.filter(note => {
+                  const noteDate = new Date(note.date)
+                  const now = new Date()
+                  return noteDate.getMonth() === now.getMonth() && 
+                         noteDate.getFullYear() === now.getFullYear()
+                }).length}
+              </p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="bg-card border border-border rounded-lg p-4 sm:p-6 sm:col-span-2 lg:col-span-1">
+          <div className="flex items-center">
+            <div className="p-2 bg-purple-500/10 rounded-lg">
+              <Hash className="h-5 w-5 sm:h-6 sm:w-6 text-purple-500" />
+            </div>
+            <div className="ml-3 sm:ml-4">
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground">With References</p>
+              <p className="text-lg sm:text-2xl font-bold text-foreground">
+                {notes.filter(note => note.reference_number && note.reference_number.trim() !== '').length}
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Investor Expense Summary */}
-      <div className="bg-card border border-border rounded-lg p-4 sm:p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
-          <DollarSign className="h-5 w-5 mr-2" />
-          Expenses by Investor
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {investors.map(investor => {
-            const investorExpenses = expenses.filter(expense => expense.paid_by === investor.id)
-            const totalAmount = investorExpenses.reduce((sum, expense) => sum + expense.amount, 0)
-            
-            return (
-              <div key={investor.id} className="bg-muted/30 rounded-lg p-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-medium text-foreground">{investor.name}</h4>
-                    <p className="text-sm text-muted-foreground">{investorExpenses.length} expenses</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-red-600">AED {totalAmount.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {totalExpenses > 0 ? ((totalAmount / totalExpenses) * 100).toFixed(1) : 0}% of total
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Expenses Display */}
+      {/* Notes Display */}
       <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
         {/* Date Filter */}
         <DateFilter
@@ -314,49 +300,48 @@ export default function ExpensesPage() {
           customDateFrom={filters.customDateFrom}
           customDateTo={filters.customDateTo}
           onFilterChange={handleFilterChange}
-          totalCount={expenses.length}
-          filteredCount={filteredExpenses.length}
+          totalCount={notes.length}
+          filteredCount={filteredNotes.length}
         />
+
         {/* Mobile Card View */}
         <div className="block lg:hidden">
-          {filteredExpenses.map((expense, index) => (
-            <div key={expense.id} className={`p-4 ${index < filteredExpenses.length - 1 ? 'border-b-2 border-red-200 dark:border-red-800 mb-4' : ''}`}>
+          {filteredNotes.map((note, index) => (
+            <div key={note.id} className={`p-4 ${index < filteredNotes.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800 mb-4' : ''}`}>
               <div className="flex justify-between items-start mb-3">
-                <div>
-                  <h3 className="font-semibold text-foreground">{expense.details}</h3>
-                  <p className="text-sm text-muted-foreground">Paid by: {expense.investor_name}</p>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-foreground mb-1">{note.details}</h3>
+                  {note.reference_number && (
+                    <p className="text-sm text-muted-foreground">Ref: {note.reference_number}</p>
+                  )}
                 </div>
-                <span className="font-medium text-red-600 dark:text-red-400">
-                  -AED {expense.amount.toFixed(2)}
-                </span>
-              </div>
-              
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <div className="flex items-center">
-                  <Calendar className="h-4 w-4 mr-2" />
-                  <span>{formatDate(expense.created_at)}</span>
-                </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 ml-4">
                   <button
-                    onClick={() => {
-                      setEditingExpense(expense)
-                      setFormData({
-                        details: expense.details,
-                        amount: expense.amount,
-                        paid_by: expense.paid_by
-                      })
-                      setShowAddModal(true)
-                    }}
-                    className="text-blue-600 hover:text-blue-800"
+                    onClick={() => handleEdit(note)}
+                    className="text-blue-600 hover:text-blue-800 p-1"
+                    title="Edit Note"
                   >
                     <Edit className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handleDelete(expense.id)}
-                    className="text-red-600 hover:text-red-800"
+                    onClick={() => handleDelete(note.id)}
+                    className="text-red-600 hover:text-red-800 p-1"
+                    title="Delete Note"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
+                </div>
+              </div>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <div className="flex items-center">
+                    <Calendar className="h-4 w-4 mr-2" />
+                    <span>Date: {formatDate(note.date)}</span>
+                  </div>
+                  <div className="text-xs">
+                    Created: {formatDateTime(note.created_at)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -372,13 +357,13 @@ export default function ExpensesPage() {
                   Details
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Paid By
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Amount
+                  Reference
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Date
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Created
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Actions
@@ -386,51 +371,48 @@ export default function ExpensesPage() {
               </tr>
             </thead>
             <tbody className="bg-card divide-y divide-border">
-              {filteredExpenses.map((expense, index) => (
-                <tr key={expense.id} className={`hover:bg-muted/30 ${index < filteredExpenses.length - 1 ? 'border-b-2 border-red-200 dark:border-red-800' : ''}`}>
+              {filteredNotes.map((note, index) => (
+                <tr key={note.id} className={`hover:bg-muted/30 ${index < filteredNotes.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800' : ''}`}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      <DollarSign className="h-5 w-5 text-muted-foreground mr-2" />
+                      <FileText className="h-5 w-5 text-muted-foreground mr-2" />
                       <span className="text-sm font-medium text-foreground">
-                        {expense.details}
+                        {note.details}
                       </span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">
-                      {expense.investor_name}
-                    </span>
+                    {note.reference_number ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">
+                        <Hash className="h-3 w-3 mr-1" />
+                        {note.reference_number}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">No reference</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    <span className="font-medium text-red-600 dark:text-red-400">
-                      -AED {expense.amount.toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                     <div className="flex items-center">
                       <Calendar className="h-4 w-4 text-muted-foreground mr-1" />
-                      {formatDate(expense.created_at)}
+                      {formatDate(note.date)}
                     </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                    {formatDateTime(note.created_at)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex gap-2">
                       <button
-                        onClick={() => {
-                          setEditingExpense(expense)
-                          setFormData({
-                            details: expense.details,
-                            amount: expense.amount,
-                            paid_by: expense.paid_by
-                          })
-                          setShowAddModal(true)
-                        }}
+                        onClick={() => handleEdit(note)}
                         className="text-blue-600 hover:text-blue-800"
+                        title="Edit Note"
                       >
                         <Edit className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(expense.id)}
+                        onClick={() => handleDelete(note.id)}
                         className="text-red-600 hover:text-red-800"
+                        title="Delete Note"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -442,12 +424,12 @@ export default function ExpensesPage() {
           </table>
         </div>
         
-        {filteredExpenses.length === 0 && (
+        {filteredNotes.length === 0 && (
           <div className="text-center py-12">
-            <DollarSign className="mx-auto h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-2 text-sm font-medium text-foreground">No expenses</h3>
+            <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
+            <h3 className="mt-2 text-sm font-medium text-foreground">No notes</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Get started by adding your first expense.
+              Get started by adding your first note.
             </p>
           </div>
         )}
@@ -459,60 +441,48 @@ export default function ExpensesPage() {
           <div className="bg-card border border-border rounded-lg shadow-xl max-w-md w-full">
             <div className="p-6">
               <h2 className="text-xl font-semibold text-foreground mb-4">
-                {editingExpense ? 'Edit Expense' : 'Add New Expense'}
+                {editingNote ? 'Edit Note' : 'Add New Note'}
               </h2>
               
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">
-                    Details
+                    Details *
                   </label>
-                  <input
-                    type="text"
+                  <textarea
                     value={formData.details}
                     onChange={(e) => setFormData(prev => ({ ...prev, details: e.target.value }))}
                     className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                    placeholder="Enter expense details"
+                    placeholder="Enter note details"
+                    rows={4}
                     required
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">
-                    Amount
+                    Reference Number
                   </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2 text-muted-foreground">AED</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.amount}
-                      onChange={(e) => setFormData(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                      className="w-full pl-12 pr-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
-                      placeholder="0.00"
-                      required
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={formData.reference_number}
+                    onChange={(e) => setFormData(prev => ({ ...prev, reference_number: e.target.value }))}
+                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                    placeholder="Enter reference number (optional)"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">
-                    Paid By
+                    Date *
                   </label>
-                  <select
-                    value={formData.paid_by}
-                    onChange={(e) => setFormData(prev => ({ ...prev, paid_by: e.target.value }))}
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                     className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
                     required
-                  >
-                    <option value="">Select an investor</option>
-                    {investors.map((investor) => (
-                      <option key={investor.id} value={investor.id}>
-                        {investor.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 <div className="flex gap-3 pt-4">
@@ -520,13 +490,13 @@ export default function ExpensesPage() {
                     type="submit"
                     className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
                   >
-                    {editingExpense ? 'Update Expense' : 'Create Expense'}
+                    {editingNote ? 'Update Note' : 'Create Note'}
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddModal(false)
-                      setEditingExpense(null)
+                      setEditingNote(null)
                       resetForm()
                     }}
                     className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"

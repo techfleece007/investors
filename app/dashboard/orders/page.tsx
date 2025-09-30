@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter } from 'lucide-react'
 import { calculatePaymentFees } from '@/lib/utils/paymentFees'
 import { sendOrderEmail } from '@/lib/utils/order-email'
+import DateFilter from '@/components/DateFilter'
 
 interface Order {
   id: string
@@ -632,7 +633,7 @@ export default function OrdersPage() {
       <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
         {/* Filter Controls */}
         <div className="p-4 border-b border-border bg-muted/50">
-          <div className="flex flex-wrap gap-4 items-center">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium text-foreground">Filters:</span>
@@ -642,7 +643,7 @@ export default function OrdersPage() {
             <select
               value={filters.status}
               onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+              className="px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground min-w-[140px]"
             >
               <option value="all">All Status</option>
               <option value="pending">Pending</option>
@@ -650,44 +651,21 @@ export default function OrdersPage() {
               <option value="canceled">Canceled</option>
             </select>
 
-            {/* Date Filter */}
-            <select
-              value={filters.dateFilter}
-              onChange={(e) => handleFilterChange('dateFilter', e.target.value)}
-              className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-            >
-              <option value="all">All Time</option>
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="year">This Year</option>
-              <option value="custom">Custom Range</option>
-            </select>
-
-            {/* Custom Date Range */}
-            {filters.dateFilter === 'custom' && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={filters.customDateFrom}
-                  onChange={(e) => handleFilterChange('customDateFrom', e.target.value)}
-                  className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                />
-                <span className="text-sm text-muted-foreground">to</span>
-                <input
-                  type="date"
-                  value={filters.customDateTo}
-                  onChange={(e) => handleFilterChange('customDateTo', e.target.value)}
-                  className="px-3 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                />
-              </div>
-            )}
-
-            <div className="text-sm text-muted-foreground">
+            <div className="text-sm text-muted-foreground ml-auto">
               Showing {filteredOrders.length} of {orders.length} orders
             </div>
           </div>
         </div>
+
+        {/* Date Filter */}
+        <DateFilter
+          dateFilter={filters.dateFilter}
+          customDateFrom={filters.customDateFrom}
+          customDateTo={filters.customDateTo}
+          onFilterChange={handleFilterChange}
+          totalCount={orders.length}
+          filteredCount={filteredOrders.length}
+        />
 
         {/* Mobile Card View */}
         <div className="block lg:hidden">

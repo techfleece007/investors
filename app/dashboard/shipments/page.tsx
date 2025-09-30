@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Plus, Edit, Trash2, Truck, Package, CheckCircle, Clock, XCircle, X } from 'lucide-react'
+import DateFilter from '@/components/DateFilter'
 
 interface Shipment {
   id: string
@@ -27,11 +28,17 @@ const statusConfig = {
 
 export default function ShipmentsPage() {
   const [shipments, setShipments] = useState<Shipment[]>([])
+  const [filteredShipments, setFilteredShipments] = useState<Shipment[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingShipment, setEditingShipment] = useState<Shipment | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
+  const [filters, setFilters] = useState({
+    dateFilter: 'all' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    customDateFrom: '',
+    customDateTo: ''
+  })
   const [formData, setFormData] = useState({
     name: '',
     cost: 0,
@@ -49,6 +56,10 @@ export default function ShipmentsPage() {
     fetchShipments()
     fetchInvestors()
   }, [])
+
+  useEffect(() => {
+    applyFilters()
+  }, [shipments, filters])
 
   const fetchShipments = async () => {
     try {
@@ -89,6 +100,53 @@ export default function ShipmentsPage() {
     } catch (error) {
       console.error('Error fetching investors:', error)
     }
+  }
+
+  const applyFilters = () => {
+    let filtered = [...shipments]
+
+    // Filter by date
+    if (filters.dateFilter !== 'all') {
+      const now = new Date()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      
+      filtered = filtered.filter(shipment => {
+        const shipmentDate = new Date(shipment.created_at)
+        
+        switch (filters.dateFilter) {
+          case 'today':
+            return shipmentDate >= today
+          case 'week':
+            const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+            return shipmentDate >= weekAgo
+          case 'month':
+            const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+            return shipmentDate >= monthAgo
+          case 'year':
+            const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
+            return shipmentDate >= yearAgo
+          case 'custom':
+            if (filters.customDateFrom && filters.customDateTo) {
+              const fromDate = new Date(filters.customDateFrom)
+              const toDate = new Date(filters.customDateTo)
+              toDate.setHours(23, 59, 59, 999) // Include the entire end date
+              return shipmentDate >= fromDate && shipmentDate <= toDate
+            }
+            return true
+          default:
+            return true
+        }
+      })
+    }
+
+    setFilteredShipments(filtered)
+  }
+
+  const handleFilterChange = (filterType: string, value: string) => {
+    setFilters(prev => ({
+      ...prev,
+      [filterType]: value
+    }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -250,14 +308,23 @@ export default function ShipmentsPage() {
 
       {/* Shipments Display */}
       <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+        {/* Date Filter */}
+        <DateFilter
+          dateFilter={filters.dateFilter}
+          customDateFrom={filters.customDateFrom}
+          customDateTo={filters.customDateTo}
+          onFilterChange={handleFilterChange}
+          totalCount={shipments.length}
+          filteredCount={filteredShipments.length}
+        />
         {/* Mobile Card View */}
         <div className="block lg:hidden">
-          {shipments.map((shipment, index) => {
+          {filteredShipments.map((shipment, index) => {
             const status = statusConfig[shipment.status]
             const StatusIcon = status.icon
             
             return (
-              <div key={shipment.id} className={`p-4 ${index < shipments.length - 1 ? 'border-b-2 border-green-200 dark:border-green-800 mb-4' : ''}`}>
+              <div key={shipment.id} className={`p-4 ${index < filteredShipments.length - 1 ? 'border-b-2 border-green-200 dark:border-green-800 mb-4' : ''}`}>
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <h3 className="font-semibold text-foreground">{shipment.name}</h3>
@@ -370,12 +437,12 @@ export default function ShipmentsPage() {
               </tr>
             </thead>
             <tbody className="bg-card divide-y divide-border">
-              {shipments.map((shipment, index) => {
+              {filteredShipments.map((shipment, index) => {
                 const status = statusConfig[shipment.status]
                 const StatusIcon = status.icon
                 
                 return (
-                  <tr key={shipment.id} className={`hover:bg-muted/30 ${index < shipments.length - 1 ? 'border-b-2 border-green-200 dark:border-green-800' : ''}`}>
+                  <tr key={shipment.id} className={`hover:bg-muted/30 ${index < filteredShipments.length - 1 ? 'border-b-2 border-green-200 dark:border-green-800' : ''}`}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <Package className="h-5 w-5 text-muted-foreground mr-2" />
@@ -443,7 +510,7 @@ export default function ShipmentsPage() {
           </table>
         </div>
         
-        {shipments.length === 0 && (
+        {filteredShipments.length === 0 && (
           <div className="text-center py-12">
             <Truck className="mx-auto h-12 w-12 text-muted-foreground" />
             <h3 className="mt-2 text-sm font-medium text-foreground">No shipments</h3>
