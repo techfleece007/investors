@@ -42,7 +42,7 @@ export default function ProfitsPage() {
   const [shipments, setShipments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
-    dateFilter: 'all' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
     customDateFrom: '',
     customDateTo: ''
   })
@@ -158,8 +158,10 @@ export default function ProfitsPage() {
             const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
             return profitDate >= weekAgo
           case 'month':
-            const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
-            return profitDate >= monthAgo
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+            endOfMonth.setHours(23, 59, 59, 999)
+            return profitDate >= startOfMonth && profitDate <= endOfMonth
           case 'year':
             const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
             return profitDate >= yearAgo
@@ -239,8 +241,57 @@ export default function ProfitsPage() {
     return sum + (costPerPiece * (profit.orders?.quantity || 0))
   }, 0)
   
-  // Calculate total business costs (expenses only - shipments are for inventory, not profit calculation)
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  // Calculate total business costs for the active date filter (default current month)
+  const getFilterDateRange = () => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    switch (filters.dateFilter) {
+      case 'today': {
+        const start = new Date(today)
+        const end = new Date(today)
+        end.setHours(23, 59, 59, 999)
+        return { start, end }
+      }
+      case 'week': {
+        const end = new Date(today)
+        end.setHours(23, 59, 59, 999)
+        const start = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+        return { start, end }
+      }
+      case 'month': {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1)
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+        end.setHours(23, 59, 59, 999)
+        return { start, end }
+      }
+      case 'year': {
+        const start = new Date(now.getFullYear(), 0, 1)
+        const end = new Date(now.getFullYear(), 11, 31)
+        end.setHours(23, 59, 59, 999)
+        return { start, end }
+      }
+      case 'custom': {
+        if (filters.customDateFrom && filters.customDateTo) {
+          const start = new Date(filters.customDateFrom)
+          const end = new Date(filters.customDateTo)
+          end.setHours(23, 59, 59, 999)
+          return { start, end }
+        }
+        return null
+      }
+      default:
+        return null
+    }
+  }
+
+  const expensesDateRange = getFilterDateRange()
+  const expensesInRange = expenses.filter(expense => {
+    if (!expensesDateRange) return true
+    const expenseDate = new Date(expense.created_at)
+    return expenseDate >= expensesDateRange.start && expenseDate <= expensesDateRange.end
+  })
+
+  const totalExpenses = expensesInRange.reduce((sum, expense) => sum + expense.amount, 0)
   
   // Calculate net profit: Total Orders Amount - Delivery Fees - Payment Fees - Product Costs - Expenses
   const netProfit = totalRevenue - totalOrderDeductions - totalProductCosts - totalExpenses

@@ -22,7 +22,7 @@ export default function ExpensesPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
   const [filters, setFilters] = useState({
-    dateFilter: 'all' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
     customDateFrom: '',
     customDateTo: ''
   })
@@ -103,8 +103,10 @@ export default function ExpensesPage() {
             const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
             return expenseDate >= weekAgo
           case 'month':
-            const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
-            return expenseDate >= monthAgo
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+            endOfMonth.setHours(23, 59, 59, 999)
+            return expenseDate >= startOfMonth && expenseDate <= endOfMonth
           case 'year':
             const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
             return expenseDate >= yearAgo
