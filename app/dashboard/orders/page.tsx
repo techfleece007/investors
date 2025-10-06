@@ -777,6 +777,9 @@ export default function OrdersPage() {
                   Total
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Net
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Payment
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -820,6 +823,16 @@ export default function OrdersPage() {
                     <div className="flex items-center">
                       <DollarSign className="h-4 w-4 text-muted-foreground mr-1" />
                       <span>AED {order.total_price.toFixed(2)}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                    <div className="flex items-center">
+                      <DollarSign className="h-4 w-4 text-muted-foreground mr-1" />
+                      <span>
+                        AED {(
+                          (order.total_price || 0) - (order.delivery_fees || 0) - (order.payment_fees || 0)
+                        ).toFixed(2)}
+                      </span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">

@@ -371,7 +371,7 @@ export default function ProfitsPage() {
       </div>
 
           <div className="text-center">
-            <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Orders Amount</h4>
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Orders Amount (Completed)</h4>
             <p className="text-3xl font-bold text-foreground">{formatCurrency(totalRevenue)}</p>
             </div>
           
