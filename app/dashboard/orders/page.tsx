@@ -60,6 +60,7 @@ export default function OrdersPage() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [filters, setFilters] = useState({
     status: 'all' as 'all' | 'pending' | 'completed' | 'canceled',
+    paymentMethod: 'all' as 'all' | 'cash' | 'card' | 'tabby',
     dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
     customDateFrom: '',
     customDateTo: ''
@@ -181,6 +182,11 @@ export default function OrdersPage() {
     // Filter by status
     if (filters.status !== 'all') {
       filtered = filtered.filter(order => order.status === filters.status)
+    }
+
+    // Filter by payment method
+    if (filters.paymentMethod !== 'all') {
+      filtered = filtered.filter(order => order.payment_method?.toLowerCase() === filters.paymentMethod)
     }
 
     // Filter by date
@@ -652,6 +658,19 @@ export default function OrdersPage() {
               <option value="completed">Completed</option>
               <option value="canceled">Canceled</option>
             </select>
+
+            {/* Payment Method Tabs */}
+            <div className="flex items-center gap-2">
+              {(['all','cash','card','tabby'] as const).map((method) => (
+                <button
+                  key={method}
+                  onClick={() => handleFilterChange('paymentMethod', method)}
+                  className={`px-3 py-1.5 rounded text-sm border ${filters.paymentMethod === method ? 'bg-blue-600 text-white border-blue-600' : 'bg-background text-foreground border-input'}`}
+                >
+                  {method === 'all' ? 'All' : method.charAt(0).toUpperCase() + method.slice(1)}
+                </button>
+              ))}
+            </div>
 
             <div className="text-sm text-muted-foreground ml-auto">
               Showing {filteredOrders.length} of {orders.length} orders

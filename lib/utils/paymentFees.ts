@@ -10,12 +10,13 @@ export function calculatePaymentFees(paymentMethod: string, orderAmount: number)
       return 0;
     
     case 'tabby':
-      // 6.99% of paid amount + 1.5 AED fixed + 6 AED transfer + 0.5% VAT
+      // 6.99% percentage + 5 AED non-refundable commission + 1.5 AED fixed + 5% VAT on fees
       const tabbyPercentage = orderAmount * 0.0699;
+      const tabbyNonRefundable = 5;
       const tabbyFixed = 1.5;
-      const tabbyTransfer = 0;
-      const tabbyVAT = (tabbyPercentage + tabbyFixed + tabbyTransfer) * 0.05;
-      return tabbyPercentage + tabbyFixed + tabbyTransfer + tabbyVAT;
+      const tabbyFeesBeforeVAT = tabbyPercentage + tabbyNonRefundable + tabbyFixed;
+      const tabbyVAT = tabbyFeesBeforeVAT * 0.05;
+      return tabbyFeesBeforeVAT + tabbyVAT;
     
     case 'card':
       // 2.9% of paid amount + 1 AED fixed + 0.5% VAT
@@ -44,14 +45,15 @@ export function getPaymentFeesBreakdown(paymentMethod: string, orderAmount: numb
       };
     
     case 'tabby':
-      const tabbyPercentage = orderAmount * 0.0699;
-      const tabbyFixed = 1.5;
-      const tabbyTransfer = 0;
-      const tabbyVAT = (tabbyPercentage + tabbyFixed + tabbyTransfer) * 0.05;
-      const tabbyTotal = tabbyPercentage + tabbyFixed + tabbyTransfer + tabbyVAT;
+      const tabbyPct = orderAmount * 0.0699;
+      const tabbyNonRef = 5;
+      const tabbyFixedFee = 1.5;
+      const tabbyBeforeVAT = tabbyPct + tabbyNonRef + tabbyFixedFee;
+      const tabbyVatAmt = tabbyBeforeVAT * 0.05;
+      const tabbyTotal = tabbyBeforeVAT + tabbyVatAmt;
       return {
         total: tabbyTotal,
-        breakdown: `6.99% (${tabbyPercentage.toFixed(2)}) + 1.5 AED fixed + 6 AED transfer + 0.5% VAT (${tabbyVAT.toFixed(2)})`
+        breakdown: `6.99% (${tabbyPct.toFixed(2)}) + 5.00 AED non-refundable + 1.50 AED fixed + 5% VAT (${tabbyVatAmt.toFixed(2)})`
       };
     
     case 'card':
