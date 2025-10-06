@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Edit, Trash2, Truck, Package, CheckCircle, Clock, XCircle, X } from 'lucide-react'
+import { Plus, Edit, Trash2, Truck, Package, CheckCircle, Clock, XCircle, X, ShoppingCart, Eye } from 'lucide-react'
 import DateFilter from '@/components/DateFilter'
 
 interface Shipment {
@@ -18,6 +18,39 @@ interface Shipment {
   status: 'pending' | 'shipped' | 'delivered'
   created_at: string
   updated_at: string
+  products?: ShipmentProduct[]
+}
+
+interface ShipmentProduct {
+  id: string
+  shipment_id: string
+  product_id: string
+  product_variant_id?: string
+  quantity_received: number
+  cost_per_item: number
+  total_cost: number
+  product_name?: string
+  variant_size?: string
+  created_at: string
+}
+
+interface Product {
+  id: string
+  name: string
+  cost_per_piece: number
+  price_per_piece: number
+  quantity: number
+  image_url: string
+  variants?: ProductVariant[]
+}
+
+interface ProductVariant {
+  id: string
+  product_id: string
+  size: string
+  quantity: number
+  price: number
+  cost: number
 }
 
 const statusConfig = {
@@ -34,6 +67,12 @@ export default function ShipmentsPage() {
   const [editingShipment, setEditingShipment] = useState<Shipment | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
+  const [showProductsModal, setShowProductsModal] = useState(false)
+  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null)
+  const [products, setProducts] = useState<Product[]>([])
+  const [shipmentProducts, setShipmentProducts] = useState<ShipmentProduct[]>([])
+  const [showAddProductModal, setShowAddProductModal] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<ShipmentProduct | null>(null)
   const [filters, setFilters] = useState({
     dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
     customDateFrom: '',
@@ -49,12 +88,19 @@ export default function ShipmentsPage() {
     destination: '',
     status: 'pending' as 'pending' | 'shipped' | 'delivered'
   })
+  const [productFormData, setProductFormData] = useState({
+    product_id: '',
+    product_variant_id: '',
+    quantity_received: 0,
+    cost_per_item: 0
+  })
   const [investors, setInvestors] = useState<{id: string, name: string}[]>([])
   const supabase = createClient()
 
   useEffect(() => {
     fetchShipments()
     fetchInvestors()
+    fetchProducts()
   }, [])
 
   useEffect(() => {
@@ -100,6 +146,127 @@ export default function ShipmentsPage() {
     } catch (error) {
       console.error('Error fetching investors:', error)
     }
+  }
+
+  const fetchProducts = async () => {
+    try {
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('*')
+        .order('name')
+
+      if (productsError) throw productsError
+
+      const { data: variantsData, error: variantsError } = await supabase
+        .from('product_variants')
+        .select('*')
+
+      if (variantsError) throw variantsError
+
+      // Group variants by product
+      const productsWithVariants = productsData.map(product => ({
+        ...product,
+        variants: variantsData.filter(variant => variant.product_id === product.id)
+      }))
+
+      setProducts(productsWithVariants)
+    } catch (error) {
+      console.error('Error fetching products:', error)
+    }
+  }
+
+  const fetchShipmentProducts = async (shipmentId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('shipment_products')
+        .select(`
+          *,
+          products (
+            name
+          ),
+          product_variants (
+            size
+          )
+        `)
+        .eq('shipment_id', shipmentId)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      
+      const transformedProducts = data.map(item => ({
+        ...item,
+        product_name: item.products?.name || 'Unknown Product',
+        variant_size: item.product_variants?.size || null
+      }))
+      
+      setShipmentProducts(transformedProducts)
+    } catch (error) {
+      console.error('Error fetching shipment products:', error)
+    }
+  }
+
+  const handleViewProducts = async (shipment: Shipment) => {
+    setSelectedShipment(shipment)
+    setShowProductsModal(true)
+    await fetchShipmentProducts(shipment.id)
+  }
+
+  const handleAddProduct = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!selectedShipment) return
+    
+    try {
+      const { error } = await supabase
+        .from('shipment_products')
+        .insert({
+          shipment_id: selectedShipment.id,
+          product_id: productFormData.product_id,
+          product_variant_id: productFormData.product_variant_id || null,
+          quantity_received: productFormData.quantity_received,
+          cost_per_item: productFormData.cost_per_item
+        })
+
+      if (error) throw error
+
+      setShowSuccess(true)
+      setSuccessMessage('Product added to shipment successfully!')
+      setShowAddProductModal(false)
+      resetProductForm()
+      await fetchShipmentProducts(selectedShipment.id)
+      
+      // Hide success message after 3 seconds
+      setTimeout(() => setShowSuccess(false), 3000)
+    } catch (error) {
+      console.error('Error adding product to shipment:', error)
+    }
+  }
+
+  const handleDeleteProduct = async (productId: string) => {
+    if (confirm('Are you sure you want to remove this product from the shipment?')) {
+      try {
+        const { error } = await supabase
+          .from('shipment_products')
+          .delete()
+          .eq('id', productId)
+
+        if (error) throw error
+        if (selectedShipment) {
+          await fetchShipmentProducts(selectedShipment.id)
+        }
+      } catch (error) {
+        console.error('Error deleting product from shipment:', error)
+      }
+    }
+  }
+
+  const resetProductForm = () => {
+    setProductFormData({
+      product_id: '',
+      product_variant_id: '',
+      quantity_received: 0,
+      cost_per_item: 0
+    })
   }
 
   const applyFilters = () => {
@@ -375,6 +542,13 @@ export default function ShipmentsPage() {
                     </div>
                     <div className="flex gap-2">
                       <button
+                        onClick={() => handleViewProducts(shipment)}
+                        className="text-green-600 hover:text-green-800"
+                        title="View Products"
+                      >
+                        <ShoppingCart className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => {
                           setEditingShipment(shipment)
                           setFormData({
@@ -390,12 +564,14 @@ export default function ShipmentsPage() {
                           setShowAddModal(true)
                         }}
                         className="text-blue-600 hover:text-blue-800"
+                        title="Edit Shipment"
                       >
                         <Edit className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(shipment.id)}
                         className="text-red-600 hover:text-red-800"
+                        title="Delete Shipment"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -479,6 +655,13 @@ export default function ShipmentsPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex gap-2">
                         <button
+                          onClick={() => handleViewProducts(shipment)}
+                          className="text-green-600 hover:text-green-800"
+                          title="View Products"
+                        >
+                          <ShoppingCart className="h-4 w-4" />
+                        </button>
+                        <button
                           onClick={() => {
                             setEditingShipment(shipment)
                             setFormData({
@@ -494,12 +677,14 @@ export default function ShipmentsPage() {
                             setShowAddModal(true)
                           }}
                           className="text-blue-600 hover:text-blue-800"
+                          title="Edit Shipment"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(shipment.id)}
                           className="text-red-600 hover:text-red-800"
+                          title="Delete Shipment"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -691,6 +876,230 @@ export default function ShipmentsPage() {
                       setShowAddModal(false)
                       setEditingShipment(null)
                       resetForm()
+                    }}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Products Modal */}
+      {showProductsModal && selectedShipment && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+          onClick={() => {
+            setShowProductsModal(false)
+            setSelectedShipment(null)
+            setShipmentProducts([])
+          }}
+        >
+          <div 
+            className="bg-card border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto mx-2 sm:mx-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center p-6 border-b border-border">
+              <h2 className="text-xl font-semibold text-foreground">
+                Products in {selectedShipment.name}
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowAddProductModal(true)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
+                >
+                  <Plus className="h-4 w-4 mr-2 inline" />
+                  Add Product
+                </button>
+                <button
+                  onClick={() => {
+                    setShowProductsModal(false)
+                    setSelectedShipment(null)
+                    setShipmentProducts([])
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Close modal"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              {shipmentProducts.length === 0 ? (
+                <div className="text-center py-12">
+                  <Package className="mx-auto h-12 w-12 text-muted-foreground" />
+                  <h3 className="mt-2 text-sm font-medium text-foreground">No products</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Add products to this shipment to track inventory and costs.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {shipmentProducts.map((product) => (
+                    <div key={product.id} className="bg-muted/30 rounded-lg p-4">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <h4 className="font-medium text-foreground">{product.product_name}</h4>
+                          {product.variant_size && (
+                            <p className="text-sm text-muted-foreground">Size: {product.variant_size}</p>
+                          )}
+                          <div className="grid grid-cols-2 gap-4 mt-2 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">Quantity:</span>
+                              <span className="ml-1 font-medium">{product.quantity_received}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Cost per item:</span>
+                              <span className="ml-1 font-medium text-green-600">AED {product.cost_per_item.toFixed(2)}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Total cost:</span>
+                              <span className="ml-1 font-medium text-green-600">AED {product.total_cost.toFixed(2)}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Added:</span>
+                              <span className="ml-1 font-medium">{new Date(product.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteProduct(product.id)}
+                          className="text-red-600 hover:text-red-800 ml-4"
+                          title="Remove Product"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Product Modal */}
+      {showAddProductModal && selectedShipment && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+          onClick={() => {
+            setShowAddProductModal(false)
+            resetProductForm()
+          }}
+        >
+          <div 
+            className="bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto mx-2 sm:mx-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center p-6 border-b border-border">
+              <h2 className="text-xl font-semibold text-foreground">
+                Add Product to {selectedShipment.name}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddProductModal(false)
+                  resetProductForm()
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close modal"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="p-6">
+              <form onSubmit={handleAddProduct} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Product
+                  </label>
+                  <select
+                    value={productFormData.product_id}
+                    onChange={(e) => {
+                      setProductFormData(prev => ({ ...prev, product_id: e.target.value, product_variant_id: '' }))
+                    }}
+                    className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                    required
+                  >
+                    <option value="">Select a product</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {productFormData.product_id && (
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Variant (Optional)
+                    </label>
+                    <select
+                      value={productFormData.product_variant_id}
+                      onChange={(e) => setProductFormData(prev => ({ ...prev, product_variant_id: e.target.value }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                    >
+                      <option value="">No variant</option>
+                      {products.find(p => p.id === productFormData.product_id)?.variants?.map((variant) => (
+                        <option key={variant.id} value={variant.id}>
+                          {variant.size} - AED {variant.price.toFixed(2)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Quantity Received
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={productFormData.quantity_received}
+                      onChange={(e) => setProductFormData(prev => ({ ...prev, quantity_received: parseInt(e.target.value) || 0 }))}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Cost per Item
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-muted-foreground">AED</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={productFormData.cost_per_item}
+                        onChange={(e) => setProductFormData(prev => ({ ...prev, cost_per_item: parseFloat(e.target.value) || 0 }))}
+                        className="w-full pl-12 pr-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                        placeholder="0.00"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
+                  >
+                    Add Product
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddProductModal(false)
+                      resetProductForm()
                     }}
                     className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
                   >
