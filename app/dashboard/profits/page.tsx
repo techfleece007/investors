@@ -225,6 +225,8 @@ export default function ProfitsPage() {
     return sum + (costPerPiece * (profit.orders?.quantity || 0))
   }, 0)
 
+  
+
   // Calculate canceled order deductions (to show what was lost due to cancellations)
   const canceledRevenue = canceledOrders.reduce((sum, profit) => {
     return sum + (profit.orders?.total_price || 0)
@@ -292,6 +294,9 @@ export default function ProfitsPage() {
   })
 
   const totalExpenses = expensesInRange.reduce((sum, expense) => sum + expense.amount, 0)
+  
+  // Calculate total orders amount excluding delivery fees, payment fees, and expenses
+  const totalOrdersExcludingFeesAndExpenses = totalRevenue - totalOrderDeductions - totalExpenses
   
   // Calculate net profit: Total Orders Amount - Delivery Fees - Payment Fees - Product Costs - Expenses
   const netProfit = totalRevenue - totalOrderDeductions - totalProductCosts - totalExpenses
@@ -371,6 +376,12 @@ export default function ProfitsPage() {
             </div>
           
           <div className="text-center">
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">Orders Amount excl. Fees & Expenses</h4>
+            <p className="text-3xl font-bold text-foreground">{formatCurrency(totalOrdersExcludingFeesAndExpenses)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Completed orders only</p>
+          </div>
+          
+          <div className="text-center">
             <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Profit Amount</h4>
             <p className={`text-3xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
               {formatCurrency(netProfit)}
@@ -414,6 +425,10 @@ export default function ProfitsPage() {
                 <span className={`font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatCurrency(netProfit)}
                 </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Orders excl. Fees & Expenses:</span>
+                <span className="font-medium text-foreground">{formatCurrency(totalOrdersExcludingFeesAndExpenses)}</span>
               </div>
             </div>
           </div>
