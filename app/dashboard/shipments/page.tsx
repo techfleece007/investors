@@ -49,12 +49,27 @@ export default function ShipmentsPage() {
     destination: '',
     status: 'pending' as 'pending' | 'shipped' | 'delivered'
   })
+  const [shipmentItems, setShipmentItems] = useState<Array<{
+    product_variant_id: string,
+    quantity: number,
+    cost_per_piece: number
+  }>>([])
   const [investors, setInvestors] = useState<{id: string, name: string}[]>([])
+  const [productVariants, setProductVariants] = useState<Array<{
+    id: string,
+    product_id: string,
+    size: string,
+    quantity: number,
+    price: number,
+    cost: number,
+    products?: { name: string }
+  }>>([])
   const supabase = createClient()
 
   useEffect(() => {
     fetchShipments()
     fetchInvestors()
+    fetchProductVariants()
   }, [])
 
   useEffect(() => {
@@ -99,6 +114,25 @@ export default function ShipmentsPage() {
       setInvestors(data)
     } catch (error) {
       console.error('Error fetching investors:', error)
+    }
+  }
+
+  const fetchProductVariants = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('product_variants')
+        .select(`
+          *,
+          products (
+            name
+          )
+        `)
+        .order('product_id, size')
+
+      if (error) throw error
+      setProductVariants(data)
+    } catch (error) {
+      console.error('Error fetching product variants:', error)
     }
   }
 
@@ -173,7 +207,8 @@ export default function ShipmentsPage() {
 
         if (error) throw error
       } else {
-        const { error } = await supabase
+        // Create shipment
+        const { data: shipmentData, error: shipmentError } = await supabase
           .from('shipments')
           .insert({
             name: formData.name,
@@ -185,8 +220,41 @@ export default function ShipmentsPage() {
             destination: formData.destination,
             status: formData.status
           })
+          .select('id')
+          .single()
 
-        if (error) throw error
+        if (shipmentError) throw shipmentError
+
+        // Create variant_shipments records for each item
+        if (shipmentItems.length > 0) {
+          const variantShipmentsData = shipmentItems.map(item => ({
+            product_variant_id: parseInt(item.product_variant_id),
+            shipment_id: shipmentData.id,
+            quantity: item.quantity,
+            cost_per_piece: item.cost_per_piece
+          }))
+
+          const { error: variantError } = await supabase
+            .from('variant_shipments')
+            .insert(variantShipmentsData)
+
+          if (variantError) throw variantError
+
+          // Update product_variants with new quantities and costs
+          for (const item of shipmentItems) {
+            const variant = productVariants.find(v => v.id === item.product_variant_id)
+            if (variant) {
+              await supabase
+                .from('product_variants')
+                .update({
+                  quantity: variant.quantity + item.quantity,
+                  cost: item.cost_per_piece,
+                  shipment_id: shipmentData.id
+                })
+                .eq('id', item.product_variant_id)
+            }
+          }
+        }
       }
 
       setShowSuccess(true)
@@ -229,6 +297,27 @@ export default function ShipmentsPage() {
       tracking_number: '',
       destination: '',
       status: 'pending'
+    })
+    setShipmentItems([])
+  }
+
+  const addShipmentItem = () => {
+    setShipmentItems(prev => [...prev, {
+      product_variant_id: '',
+      quantity: 0,
+      cost_per_piece: 0
+    }])
+  }
+
+  const removeShipmentItem = (index: number) => {
+    setShipmentItems(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const updateShipmentItem = (index: number, field: string, value: string | number) => {
+    setShipmentItems(prev => {
+      const updated = [...prev]
+      updated[index] = { ...updated[index], [field]: value }
+      return updated
     })
   }
 
@@ -676,6 +765,97 @@ export default function ShipmentsPage() {
                       <option value="delivered">Delivered</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Shipment Items Section */}
+                <div className="mt-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <label className="block text-sm font-medium text-foreground">
+                      Shipment Items (Optional)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addShipmentItem}
+                      className="text-sm text-blue-600 hover:text-blue-800"
+                    >
+                      + Add Product Variant
+                    </button>
+                  </div>
+                  
+                  {shipmentItems.length > 0 && (
+                    <div className="space-y-3">
+                      {shipmentItems.map((item, index) => (
+                        <div key={index} className="border border-border rounded-md p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                                Product Variant
+                              </label>
+                              <select
+                                value={item.product_variant_id}
+                                onChange={(e) => updateShipmentItem(index, 'product_variant_id', e.target.value)}
+                                className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                              >
+                                <option value="">Select Variant</option>
+                                {productVariants.map((variant) => (
+                                  <option key={variant.id} value={variant.id}>
+                                    {variant.products?.name} - {variant.size}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            
+                            <div>
+                              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                                Quantity
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.quantity}
+                                onChange={(e) => updateShipmentItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                                placeholder="0"
+                              />
+                            </div>
+                            
+                            <div>
+                              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                                Cost per Piece
+                              </label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={item.cost_per_piece}
+                                onChange={(e) => updateShipmentItem(index, 'cost_per_piece', parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                                placeholder="0.00"
+                              />
+                            </div>
+                            
+                            <div className="flex items-end">
+                              <button
+                                type="button"
+                                onClick={() => removeShipmentItem(index)}
+                                className="w-full px-3 py-2 text-red-600 hover:bg-red-100 rounded text-sm"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {shipmentItems.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Package className="mx-auto h-8 w-8 mb-2" />
+                      <p>No product variants added to this shipment</p>
+                      <p className="text-sm">Click "Add Product Variant" to track inventory</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-3 pt-4">
