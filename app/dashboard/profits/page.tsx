@@ -60,16 +60,10 @@ export default function ProfitsPage() {
 
   const fetchProfits = async () => {
     try {
-      // Fetch orders directly instead of profits table
+      // Use the new view that includes shipment-based cost calculations
       const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
-        .select(`
-          *,
-              products (
-            name,
-            cost_per_piece
-          )
-        `)
+        .from('order_profits_with_shipment_costs')
+        .select('*')
         .in('status', ['completed', 'canceled'])
         .order('created_at', { ascending: false })
 
@@ -77,29 +71,29 @@ export default function ProfitsPage() {
 
       // Transform orders data to match the expected format
       const transformedProfits = ordersData.map(order => ({
-        id: `order-${order.id}`,
-        order_id: order.id,
+        id: `order-${order.order_id}`,
+        order_id: order.order_id,
         investor_id: 'shady', // We'll calculate this based on the order
         gross_profit: 0, // Not used in our calculation
-        net_profit: 0, // Not used in our calculation
+        net_profit: order.net_profit || 0, // Now using actual shipment-based profit
         created_at: order.created_at,
-        product_name: order.products?.name || 'Unknown Product',
-        sizes: order.sizes || 'Unknown Size',
+        product_name: order.product_name || 'Unknown Product',
+        sizes: 'N/A', // This view doesn't include sizes, but we can add it if needed
         quantity: order.quantity || 0,
-        order_number: order.order_number || 0,
+        order_number: 0, // This view doesn't include order_number, but we can add it if needed
         investor_name: 'Unknown Investor', // Not used in our calculation
         orders: {
           product_id: order.product_id,
-          sizes: order.sizes,
+          sizes: 'N/A',
           quantity: order.quantity,
-          order_number: order.order_number,
+          order_number: 0,
           total_price: order.total_price,
           status: order.status,
           delivery_fees: order.delivery_fees,
           payment_fees: order.payment_fees,
           products: {
-            name: order.products?.name,
-            cost_per_piece: order.products?.cost_per_piece
+            name: order.product_name,
+            cost_per_piece: order.actual_cost_per_piece // Now using actual shipment cost
           }
         }
       }))
