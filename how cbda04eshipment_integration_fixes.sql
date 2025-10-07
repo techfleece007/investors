@@ -234,9 +234,4 @@ GRANT EXECUTE ON FUNCTION get_product_inventory_with_costs TO authenticated;
 
 -- 10. Add comments for documentation
 COMMENT ON TABLE shipment_products IS 'Junction table linking shipments to products with shipment-specific costs and quantities';
-COMMENT ON COLUMN shipment_products.cost_per_item IS 'Cost per item for this specific shipment (can differ from product.cost_per_piece)';
-COMMENT ON COLUMN shipment_products.quantity_received IS 'Quantity of this product received in this shipment';
-COMMENT ON COLUMN shipment_products.total_cost IS 'Automatically calculated as quantity_received * cost_per_item';
-COMMENT ON VIEW order_profits_with_shipment_costs IS 'View showing order profits calculated using actual shipment costs instead of static product costs';
-COMMENT ON FUNCTION get_actual_product_cost IS 'Returns the actual cost per item for a product using FIFO method from shipment data';
-COMMENT ON FUNCTION get_product_weighted_average_cost IS 'Returns the weighted average cost per item for a product across all shipments';
+COMMENT ON COLUMN shipment_products.cost_per_item IS 'Cost per item for this spe
