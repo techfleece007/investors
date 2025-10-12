@@ -183,7 +183,7 @@ trading-dashboard/
 
 ### Order System
 - Create orders from available product variants
-- Automatic payment fees calculation (Cash: 0%, Card: 2.9% + 1 AED + 0.5% VAT, Tabby: 6.99% + 1.5 AED + 6 AED + 0.5% VAT)
+- Automatic payment fees calculation (Cash: 0%, Card: 2.9% + 1 AED + 5% VAT, Tabby: 6.99% + 1.5 AED + 5% VAT)
 - Automatic stock reduction via SQL triggers
 - Order status management (pending, completed, canceled)
 - **Automatic quantity restoration** when orders are canceled
