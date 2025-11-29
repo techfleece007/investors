@@ -60,7 +60,9 @@ export default function ExpensesPage() {
       
       const transformedExpenses = data.map(expense => ({
         ...expense,
-        investor_name: expense.investors?.name || 'Unknown'
+        investor_name: expense.paid_by === 'orders_amount' 
+          ? 'Capital' 
+          : (expense.investors?.name || 'Unknown')
       }))
       
       setExpenses(transformedExpenses)
@@ -281,9 +283,31 @@ export default function ExpensesPage() {
       <div className="bg-card border border-border rounded-lg p-4 sm:p-6">
         <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
           <DollarSign className="h-5 w-5 mr-2" />
-          Expenses by Investor
+          Expenses by Payer
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Capital Card */}
+          {(() => {
+            const capitalExpenses = expenses.filter(expense => expense.paid_by === 'orders_amount')
+            const totalAmount = capitalExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+            
+            return (
+              <div className="bg-muted/30 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-800">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="font-medium text-foreground">Capital</h4>
+                    <p className="text-sm text-muted-foreground">{capitalExpenses.length} expenses</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-blue-600">AED {totalAmount.toFixed(2)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {totalExpenses > 0 ? ((totalAmount / totalExpenses) * 100).toFixed(1) : 0}% of total
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
           {investors.map(investor => {
             const investorExpenses = expenses.filter(expense => expense.paid_by === investor.id)
             const totalAmount = investorExpenses.reduce((sum, expense) => sum + expense.amount, 0)
@@ -508,7 +532,8 @@ export default function ExpensesPage() {
                     className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
                     required
                   >
-                    <option value="">Select an investor</option>
+                    <option value="">Select who paid</option>
+                    <option value="orders_amount">Capital</option>
                     {investors.map((investor) => (
                       <option key={investor.id} value={investor.id}>
                         {investor.name}

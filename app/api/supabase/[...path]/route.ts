@@ -42,7 +42,16 @@ export async function OPTIONS(
   request: NextRequest,
   { params }: { params: { path: string[] } }
 ) {
-  return handleRequest(request, params.path, 'OPTIONS')
+  // Handle preflight requests
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey, x-client-info, x-supabase-api-version',
+      'Access-Control-Max-Age': '86400',
+    }
+  })
 }
 
 async function handleRequest(
@@ -57,25 +66,20 @@ async function handleRequest(
     const searchParams = url.searchParams.toString()
     const fullPath = `${SUPABASE_URL}/${path}${searchParams ? `?${searchParams}` : ''}`
 
-    // Prepare headers
+    // Prepare headers - start with required Supabase headers
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
       'apikey': SUPABASE_ANON_KEY!,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     }
 
     // Copy relevant headers from the original request
     const requestHeaders = request.headers
     const relevantHeaders = [
       'accept',
-      'accept-encoding',
       'accept-language',
       'cache-control',
       'content-type',
-      'user-agent',
-      'x-forwarded-for',
-      'x-forwarded-proto',
-      'x-real-ip',
+      'x-client-info',
+      'x-supabase-api-version',
     ]
 
     for (const headerName of relevantHeaders) {
@@ -85,11 +89,9 @@ async function handleRequest(
       }
     }
 
-    // Handle authorization header if present
+    // Handle authorization header - use client's auth header or fall back to anon key
     const authHeader = requestHeaders.get('authorization')
-    if (authHeader) {
-      headers['Authorization'] = authHeader
-    }
+    headers['Authorization'] = authHeader || `Bearer ${SUPABASE_ANON_KEY}`
 
     // Prepare request body
     let body: string | undefined
@@ -117,29 +119,26 @@ async function handleRequest(
       statusText: response.statusText,
     })
 
-    // Copy relevant response headers
-    const responseHeaders = response.headers
-    const relevantResponseHeaders = [
-      'content-type',
-      'content-encoding',
-      'cache-control',
-      'etag',
-      'last-modified',
-      'set-cookie',
-    ]
-
-    for (const headerName of relevantResponseHeaders) {
-      const headerValue = responseHeaders.get(headerName)
-      if (headerValue) {
-        nextResponse.headers.set(headerName, headerValue)
-      }
+    // Copy content-type header - important for JSON parsing
+    const contentType = response.headers.get('content-type')
+    if (contentType) {
+      nextResponse.headers.set('Content-Type', contentType)
     }
+
+    // Copy cache headers
+    const cacheControl = response.headers.get('cache-control')
+    if (cacheControl) {
+      nextResponse.headers.set('Cache-Control', cacheControl)
+    }
+
+    // Note: We intentionally do NOT pass through set-cookie from Supabase
+    // because those cookies have domain=.supabase.co which won't work on localhost
+    // The Supabase client handles session storage via its own cookie mechanism
 
     // Add CORS headers
     nextResponse.headers.set('Access-Control-Allow-Origin', '*')
     nextResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
-    nextResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey')
-    nextResponse.headers.set('Access-Control-Allow-Credentials', 'true')
+    nextResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey, x-client-info, x-supabase-api-version')
 
     return nextResponse
 

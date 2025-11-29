@@ -23,6 +23,20 @@ interface ProductVariant {
   cost: number
 }
 
+// Size order for sorting
+const SIZE_ORDER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL']
+
+const sortBySize = (variants: ProductVariant[]) => {
+  return [...variants].sort((a, b) => {
+    const indexA = SIZE_ORDER.indexOf(a.size.toUpperCase())
+    const indexB = SIZE_ORDER.indexOf(b.size.toUpperCase())
+    // If size not found in order, put it at the end
+    const orderA = indexA === -1 ? SIZE_ORDER.length : indexA
+    const orderB = indexB === -1 ? SIZE_ORDER.length : indexB
+    return orderA - orderB
+  })
+}
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
@@ -312,7 +326,7 @@ export default function ProductsPage() {
                 </div>
                 <div className="border-t pt-2 mt-2">
                   <p className="text-xs text-muted-foreground mb-1">Variants:</p>
-                  {product.variants.map((variant) => (
+                  {sortBySize(product.variants).map((variant) => (
                     <div key={variant.id} className="flex justify-between text-xs">
                       <span className="text-muted-foreground">Size {variant.size}:</span>
                       <span className="text-foreground">

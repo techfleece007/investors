@@ -1,14 +1,20 @@
 import { createBrowserClient } from '@supabase/ssr'
 
 export function createClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   
   // Validate environment variables
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!supabaseAnonKey) {
     console.error('Missing Supabase configuration. Please check your environment variables.')
     throw new Error('Supabase configuration is missing')
   }
+
+  // Use relative URL for the proxy - this works in both dev (localhost:3000) and production
+  // In dev: http://localhost:3000/api/supabase
+  // In prod: https://investors-nu.vercel.app/api/supabase
+  const supabaseUrl = typeof window !== 'undefined' 
+    ? `${window.location.origin}/api/supabase`
+    : process.env.NEXT_PUBLIC_SUPABASE_URL!
 
   // Ensure Supabase URL is properly formatted
   const formattedUrl = supabaseUrl.endsWith('/') 
@@ -24,16 +30,22 @@ export function createClient() {
           if (typeof document === 'undefined') return undefined
           const cookies = document.cookie.split(';')
           const cookie = cookies.find(c => c.trim().startsWith(`${name}=`))
-          return cookie ? cookie.split('=')[1] : undefined
+          if (!cookie) return undefined
+          // Handle cookies with '=' in the value (like JWTs)
+          const eqIndex = cookie.indexOf('=')
+          return eqIndex !== -1 ? cookie.substring(eqIndex + 1) : undefined
         },
         set(name: string, value: string, options: any) {
           if (typeof document === 'undefined') return
+          // Don't set secure flag on localhost
+          const isLocalhost = typeof window !== 'undefined' && 
+            (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          
           const cookieOptions = [
             `path=${options?.path || '/'}`,
             `max-age=${options?.maxAge || 60 * 60 * 24 * 7}`,
             `samesite=${options?.sameSite || 'lax'}`,
-            ...(options?.secure ? ['secure'] : []),
-            ...(options?.domain ? [`domain=${options.domain}`] : [])
+            ...(!isLocalhost && options?.secure ? ['secure'] : []),
           ].join('; ')
           document.cookie = `${name}=${value}; ${cookieOptions}`
         },
@@ -43,8 +55,6 @@ export function createClient() {
             `path=${options?.path || '/'}`,
             'max-age=0',
             `samesite=${options?.sameSite || 'lax'}`,
-            ...(options?.secure ? ['secure'] : []),
-            ...(options?.domain ? [`domain=${options.domain}`] : [])
           ].join('; ')
           document.cookie = `${name}=; ${cookieOptions}`
         }
@@ -53,7 +63,7 @@ export function createClient() {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
-        flowType: 'pkce'
+        flowType: 'implicit'
       }
     }
   )

@@ -65,6 +65,19 @@ export default function ShipmentsPage() {
     products?: { name: string }
   }>>([])
   const supabase = createClient()
+  
+  // Size order for sorting
+  const SIZE_ORDER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL']
+  
+  const sortVariantsBySize = <T extends { size: string }>(variants: T[]): T[] => {
+    return [...variants].sort((a, b) => {
+      const indexA = SIZE_ORDER.indexOf(a.size.toUpperCase())
+      const indexB = SIZE_ORDER.indexOf(b.size.toUpperCase())
+      const orderA = indexA === -1 ? SIZE_ORDER.length : indexA
+      const orderB = indexB === -1 ? SIZE_ORDER.length : indexB
+      return orderA - orderB
+    })
+  }
 
   useEffect(() => {
     fetchShipments()
@@ -92,7 +105,9 @@ export default function ShipmentsPage() {
       
       const transformedShipments = data.map(shipment => ({
         ...shipment,
-        investor_name: shipment.investors?.name || 'Unknown'
+        investor_name: shipment.paid_by === 'orders_amount' 
+          ? 'Capital' 
+          : (shipment.investors?.name || 'Unknown')
       }))
       
       setShipments(transformedShipments)
@@ -369,9 +384,33 @@ export default function ShipmentsPage() {
       <div className="bg-card border border-border rounded-lg p-4 sm:p-6">
         <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
           <Truck className="h-5 w-5 mr-2" />
-          Shipment Costs by Investor
+          Shipment Costs by Payer
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Capital Card */}
+          {(() => {
+            const capitalShipments = shipments.filter(shipment => shipment.paid_by === 'orders_amount')
+            const totalAmount = capitalShipments.reduce((sum, shipment) => sum + shipment.cost, 0)
+            const totalShipmentsCost = shipments.reduce((sum, s) => sum + s.cost, 0)
+            
+            return (
+              <div className="bg-muted/30 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-800">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="font-medium text-foreground">Capital</h4>
+                    <p className="text-sm text-muted-foreground">{capitalShipments.length} shipments</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-blue-600">AED {totalAmount.toFixed(2)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {totalShipmentsCost > 0 ? 
+                        ((totalAmount / totalShipmentsCost) * 100).toFixed(1) : 0}% of total
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
           {investors.map(investor => {
             const investorShipments = shipments.filter(shipment => shipment.paid_by === investor.id)
             const totalAmount = investorShipments.reduce((sum, shipment) => sum + shipment.cost, 0)
@@ -702,7 +741,8 @@ export default function ShipmentsPage() {
                       className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
                       required
                     >
-                      <option value="">Select an investor</option>
+                      <option value="">Select who paid</option>
+                      <option value="orders_amount">Capital</option>
                       {investors.map((investor) => (
                         <option key={investor.id} value={investor.id}>
                           {investor.name}
@@ -797,7 +837,7 @@ export default function ShipmentsPage() {
                                 className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
                               >
                                 <option value="">Select Variant</option>
-                                {productVariants.map((variant) => (
+                                {sortVariantsBySize(productVariants).map((variant) => (
                                   <option key={variant.id} value={variant.id}>
                                     {variant.products?.name} - {variant.size}
                                   </option>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter } from 'lucide-react'
+import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter, RefreshCw } from 'lucide-react'
 import { calculatePaymentFees } from '@/lib/utils/paymentFees'
 import { sendOrderEmail } from '@/lib/utils/order-email'
 import DateFilter from '@/components/DateFilter'
@@ -49,6 +49,33 @@ interface OrderItem {
   total_price: number
 }
 
+// Size order for sorting
+const SIZE_ORDER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL']
+
+const sortVariantsBySize = (variants: ProductVariant[]) => {
+  return [...variants].sort((a, b) => {
+    const indexA = SIZE_ORDER.indexOf(a.size.toUpperCase())
+    const indexB = SIZE_ORDER.indexOf(b.size.toUpperCase())
+    // If size not found in order, put it at the end
+    const orderA = indexA === -1 ? SIZE_ORDER.length : indexA
+    const orderB = indexB === -1 ? SIZE_ORDER.length : indexB
+    return orderA - orderB
+  })
+}
+
+interface ExchangeData {
+  order: Order | null
+  originalOrderDetails: any[]
+  newProduct: {
+    product_id: string
+    product_name: string
+    size: string
+    quantity: number
+    price_per_piece: number
+    total_price: number
+  }
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
@@ -56,7 +83,21 @@ export default function OrdersPage() {
   const [productVariants, setProductVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showExchangeModal, setShowExchangeModal] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
+  const [exchangeData, setExchangeData] = useState<ExchangeData>({
+    order: null,
+    originalOrderDetails: [],
+    newProduct: {
+      product_id: '',
+      product_name: '',
+      size: '',
+      quantity: 1,
+      price_per_piece: 0,
+      total_price: 0
+    }
+  })
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [filters, setFilters] = useState({
     status: 'all' as 'all' | 'pending' | 'completed' | 'canceled',
@@ -335,7 +376,8 @@ export default function OrdersPage() {
   }
 
   const getAvailableSizes = (productId: string) => {
-    return productVariants.filter(v => v.product_id.toString() === productId)
+    const variants = productVariants.filter(v => v.product_id.toString() === productId)
+    return sortVariantsBySize(variants)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -388,8 +430,25 @@ export default function OrdersPage() {
 
         if (orderError) throw orderError
 
-        // Note: Product quantity updates and profit calculations are handled automatically by SQL triggers
-        // Each product gets its own row with its specific size and quantity
+        // Update product variant quantity
+        const variant = productVariants.find(v => 
+          v.product_id.toString() === item.product_id && v.size === item.size
+        )
+        if (variant) {
+          await supabase
+            .from('product_variants')
+            .update({ quantity: Math.max(0, variant.quantity - item.quantity) })
+            .eq('id', variant.id)
+        }
+        
+        // Update product total quantity
+        const product = products.find(p => p.id.toString() === item.product_id)
+        if (product) {
+          await supabase
+            .from('products')
+            .update({ quantity: Math.max(0, product.quantity - item.quantity) })
+            .eq('id', product.id)
+        }
       }
 
       // Send email notification for new order (one email with all items)
@@ -417,6 +476,7 @@ export default function OrdersPage() {
         // Don't fail the order creation if email fails
       }
 
+      setSuccessMessage('Order created successfully! Each product saved as separate row.')
       setShowSuccess(true)
       setShowAddModal(false)
       setOrderItems([])
@@ -489,6 +549,7 @@ export default function OrdersPage() {
             )
             
             if (variant) {
+              // Restore variant quantity
               const { error: variantError } = await supabase
                 .from('product_variants')
                 .update({ 
@@ -500,31 +561,71 @@ export default function OrdersPage() {
                 console.error('Error restoring variant quantity:', variantError)
               }
             }
-          }
-        }
-
-        // Handle quantity deduction for completed orders (if previously canceled)
-        if (newStatus === 'completed' && oldStatus === 'canceled') {
-          // Deduct quantities for all products in this order
-          for (const orderItem of orderData) {
-            // Find the product variant to deduct quantity
-            const variant = productVariants.find(v => 
-              v.product_id === orderItem.product_id && v.size === orderItem.sizes
-            )
             
-            if (variant) {
-              const { error: variantError } = await supabase
-                .from('product_variants')
+            // Also restore the product total quantity
+            const product = products.find(p => p.id.toString() === orderItem.product_id.toString())
+            if (product) {
+              const { error: productError } = await supabase
+                .from('products')
                 .update({ 
-                  quantity: Math.max(0, variant.quantity - orderItem.quantity)
+                  quantity: product.quantity + orderItem.quantity 
                 })
-                .eq('id', variant.id)
+                .eq('id', orderItem.product_id)
 
-              if (variantError) {
-                console.error('Error deducting variant quantity:', variantError)
+              if (productError) {
+                console.error('Error restoring product quantity:', productError)
               }
             }
           }
+        }
+
+        // Handle quantity deduction for completed orders (from pending or canceled)
+        if (newStatus === 'completed' && oldStatus !== 'completed') {
+          // Only deduct if previously canceled (pending orders already had quantity deducted on creation)
+          if (oldStatus === 'canceled') {
+            // Deduct quantities for all products in this order
+            for (const orderItem of orderData) {
+              // Find the product variant to deduct quantity
+              const variant = productVariants.find(v => 
+                v.product_id === orderItem.product_id && v.size === orderItem.sizes
+              )
+              
+              if (variant) {
+                // Deduct variant quantity
+                const { error: variantError } = await supabase
+                  .from('product_variants')
+                  .update({ 
+                    quantity: Math.max(0, variant.quantity - orderItem.quantity)
+                  })
+                  .eq('id', variant.id)
+
+                if (variantError) {
+                  console.error('Error deducting variant quantity:', variantError)
+                }
+              }
+              
+              // Also deduct from the product total quantity
+              const product = products.find(p => p.id.toString() === orderItem.product_id.toString())
+              if (product) {
+                const { error: productError } = await supabase
+                  .from('products')
+                  .update({ 
+                    quantity: Math.max(0, product.quantity - orderItem.quantity)
+                  })
+                  .eq('id', orderItem.product_id)
+
+                if (productError) {
+                  console.error('Error deducting product quantity:', productError)
+                }
+              }
+            }
+          }
+        }
+        
+        // Handle quantity restoration when going from pending to canceled
+        // (pending orders already have quantity deducted, so restore it)
+        if (newStatus === 'canceled' && oldStatus === 'pending') {
+          // Quantity was already restored above in the canceled block
         }
 
         // Update all orders with the same order number
@@ -592,6 +693,292 @@ export default function OrdersPage() {
     }
   }
 
+  const handleOpenExchangeModal = async (order: Order) => {
+    try {
+      // Get all orders with the same order number
+      const { data: orderData, error: fetchError } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          products (
+            id,
+            name,
+            cost_per_piece,
+            price_per_piece
+          )
+        `)
+        .eq('order_number', order.order_number)
+        .order('created_at', { ascending: false })
+
+      if (fetchError) throw fetchError
+
+      if (!orderData || orderData.length === 0) {
+        alert('Order not found')
+        return
+      }
+
+      // Set exchange data with the first item as the one to exchange
+      const firstOrder = orderData[0]
+      setExchangeData({
+        order: order,
+        originalOrderDetails: orderData,
+        newProduct: {
+          product_id: firstOrder.product_id.toString(),
+          product_name: (firstOrder.products as any)?.name || 'Unknown Product',
+          size: firstOrder.sizes || '',
+          quantity: firstOrder.quantity,
+          price_per_piece: firstOrder.total_price / firstOrder.quantity,
+          total_price: firstOrder.total_price
+        }
+      })
+      setShowExchangeModal(true)
+    } catch (error) {
+      console.error('Error opening exchange modal:', error)
+      alert('Error loading order details. Please try again.')
+    }
+  }
+
+  const handleExchangeProductChange = (productId: string) => {
+    const product = products.find(p => p.id.toString() === productId)
+    
+    if (product) {
+      setExchangeData(prev => ({
+        ...prev,
+        newProduct: {
+          ...prev.newProduct,
+          product_id: productId,
+          product_name: product.name,
+          price_per_piece: product.price_per_piece,
+          total_price: product.price_per_piece * prev.newProduct.quantity,
+          size: '' // Reset size when product changes
+        }
+      }))
+    }
+  }
+
+  const handleExchangeSizeChange = (size: string) => {
+    const variant = productVariants.find(v => 
+      v.product_id.toString() === exchangeData.newProduct.product_id && v.size === size
+    )
+    
+    if (variant) {
+      setExchangeData(prev => ({
+        ...prev,
+        newProduct: {
+          ...prev.newProduct,
+          size: size,
+          price_per_piece: variant.price,
+          total_price: variant.price * prev.newProduct.quantity
+        }
+      }))
+    }
+  }
+
+  const handleExchangeQuantityChange = (quantity: number) => {
+    setExchangeData(prev => ({
+      ...prev,
+      newProduct: {
+        ...prev.newProduct,
+        quantity: quantity,
+        total_price: prev.newProduct.price_per_piece * quantity
+      }
+    }))
+  }
+
+  const handleExchangeSubmit = async () => {
+    if (!exchangeData.order || !exchangeData.newProduct.product_id || !exchangeData.newProduct.size) {
+      alert('Please select a product and size for the exchange')
+      return
+    }
+
+    // Check if there's enough stock for the new product
+    const newVariant = productVariants.find(v => 
+      v.product_id.toString() === exchangeData.newProduct.product_id && v.size === exchangeData.newProduct.size
+    )
+    
+    if (!newVariant || newVariant.quantity < exchangeData.newProduct.quantity) {
+      alert(`Insufficient stock for ${exchangeData.newProduct.product_name} - Size ${exchangeData.newProduct.size}. Available: ${newVariant?.quantity || 0}`)
+      return
+    }
+
+    try {
+      const oldOrderDetails = exchangeData.originalOrderDetails
+      const oldTotalPrice = oldOrderDetails.reduce((sum, o) => sum + o.total_price, 0)
+      const newTotalPrice = exchangeData.newProduct.total_price
+      const priceDifference = newTotalPrice - oldTotalPrice
+
+      // 1. Restore quantities for OLD products (restore stock)
+      for (const oldOrder of oldOrderDetails) {
+        // Find and restore old variant quantity
+        const oldVariant = productVariants.find(v => 
+          v.product_id === oldOrder.product_id && v.size === oldOrder.sizes
+        )
+        
+        if (oldVariant) {
+          const { error: variantRestoreError } = await supabase
+            .from('product_variants')
+            .update({ quantity: oldVariant.quantity + oldOrder.quantity })
+            .eq('id', oldVariant.id)
+          
+          if (variantRestoreError) console.error('Error restoring variant quantity:', variantRestoreError)
+        }
+        
+        // Restore product total quantity
+        const oldProduct = products.find(p => p.id.toString() === oldOrder.product_id.toString())
+        if (oldProduct) {
+          const { error: productRestoreError } = await supabase
+            .from('products')
+            .update({ quantity: oldProduct.quantity + oldOrder.quantity })
+            .eq('id', oldOrder.product_id)
+          
+          if (productRestoreError) console.error('Error restoring product quantity:', productRestoreError)
+        }
+      }
+
+      // 2. Deduct quantities for NEW product
+      // IMPORTANT: Fetch fresh quantities from database to avoid using stale local state
+      // This prevents double-deduction issues when exchanging to same product with different size
+      
+      // Fetch current variant quantity from database
+      const { data: freshVariant, error: freshVariantError } = await supabase
+        .from('product_variants')
+        .select('quantity')
+        .eq('id', newVariant.id)
+        .single()
+      
+      if (freshVariantError) {
+        console.error('Error fetching fresh variant quantity:', freshVariantError)
+      }
+      
+      // Deduct from variant using fresh database value
+      const currentVariantQty = freshVariant?.quantity ?? newVariant.quantity
+      const { error: variantDeductError } = await supabase
+        .from('product_variants')
+        .update({ quantity: Math.max(0, currentVariantQty - exchangeData.newProduct.quantity) })
+        .eq('id', newVariant.id)
+      
+      if (variantDeductError) console.error('Error deducting variant quantity:', variantDeductError)
+      
+      // Fetch current product quantity from database
+      const { data: freshProduct, error: freshProductError } = await supabase
+        .from('products')
+        .select('quantity')
+        .eq('id', exchangeData.newProduct.product_id)
+        .single()
+      
+      if (freshProductError) {
+        console.error('Error fetching fresh product quantity:', freshProductError)
+      }
+      
+      // Deduct from product total using fresh database value
+      const currentProductQty = freshProduct?.quantity ?? 0
+      const { error: productDeductError } = await supabase
+        .from('products')
+        .update({ quantity: Math.max(0, currentProductQty - exchangeData.newProduct.quantity) })
+        .eq('id', exchangeData.newProduct.product_id)
+      
+      if (productDeductError) console.error('Error deducting product quantity:', productDeductError)
+
+      // 3. Delete old order rows
+      for (const oldOrder of oldOrderDetails) {
+        const { error: deleteError } = await supabase
+          .from('orders')
+          .delete()
+          .eq('id', oldOrder.id)
+        
+        if (deleteError) console.error('Error deleting old order:', deleteError)
+      }
+
+      // 4. Create new order row with updated details
+      // IMPORTANT: Keep the original payment fees from the old order
+      // If price is higher, the difference is paid by cash (no fees on difference)
+      // Payment fees should only apply to the original order amount
+      const originalPaymentFees = oldOrderDetails.reduce((sum, o) => sum + (o.payment_fees || 0), 0)
+      
+      // Determine the payment method to record:
+      // - If new price <= old price: keep original payment method
+      // - If new price > old price: still keep original method (difference paid by cash, but we don't add fees)
+      const paymentMethod = oldOrderDetails[0].payment_method
+      
+      const { error: insertError } = await supabase
+        .from('orders')
+        .insert({
+          product_id: parseInt(exchangeData.newProduct.product_id),
+          order_number: exchangeData.order.order_number,
+          shipping_number: exchangeData.order.shipping_number,
+          paid_amount: newTotalPrice,
+          total_price: newTotalPrice,
+          quantity: exchangeData.newProduct.quantity,
+          sizes: exchangeData.newProduct.size,
+          payment_method: paymentMethod,
+          payment_fees: originalPaymentFees, // Keep original fees, no fees on cash difference
+          delivery_fees: oldOrderDetails[0].delivery_fees,
+          status: oldOrderDetails[0].status
+        })
+
+      if (insertError) throw insertError
+
+      // 5. Send exchange email notification
+      try {
+        const oldItems = oldOrderDetails.map(order => ({
+          product_name: (order.products as any)?.name || 'Unknown Product',
+          size: order.sizes,
+          quantity: order.quantity,
+          unit_price: order.total_price / order.quantity,
+          total_price: order.total_price
+        }))
+
+        const newItems = [{
+          product_name: exchangeData.newProduct.product_name,
+          size: exchangeData.newProduct.size,
+          quantity: exchangeData.newProduct.quantity,
+          unit_price: exchangeData.newProduct.price_per_piece,
+          total_price: exchangeData.newProduct.total_price
+        }]
+
+        await fetch('/api/send-exchange-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_number: exchangeData.order.order_number,
+            shipping_number: exchangeData.order.shipping_number,
+            old_items: oldItems,
+            new_items: newItems,
+            price_difference: priceDifference,
+            exchange_date: new Date().toISOString()
+          })
+        })
+      } catch (emailError) {
+        console.error('Error sending exchange email:', emailError)
+        // Don't fail the exchange if email fails
+      }
+
+      // Close modal and refresh data
+      setShowExchangeModal(false)
+      setExchangeData({
+        order: null,
+        originalOrderDetails: [],
+        newProduct: {
+          product_id: '',
+          product_name: '',
+          size: '',
+          quantity: 1,
+          price_per_piece: 0,
+          total_price: 0
+        }
+      })
+      
+      setSuccessMessage(`Order #${exchangeData.order.order_number} exchanged successfully!${priceDifference !== 0 ? ` Price difference: AED ${priceDifference.toFixed(2)}` : ''}`)
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 4000)
+      
+      fetchData()
+    } catch (error) {
+      console.error('Error processing exchange:', error)
+      alert('Error processing exchange. Please try again.')
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -632,7 +1019,7 @@ export default function OrdersPage() {
         <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-in slide-in-from-right-2">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-5 w-5" />
-            <span>Order created successfully! Each product saved as separate row.</span>
+            <span>{successMessage || 'Order created successfully! Each product saved as separate row.'}</span>
           </div>
         </div>
       )}
@@ -751,6 +1138,13 @@ export default function OrdersPage() {
                     <span>{formatDate(order.created_at)}</span>
                   </div>
                   <div className="flex gap-2">
+                    <button
+                      onClick={() => handleOpenExchangeModal(order)}
+                      className="text-orange-600 hover:text-orange-800 p-1"
+                      title="Exchange Order"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => handleEditOrder(order)}
                       className="text-blue-600 hover:text-blue-800 p-1"
@@ -880,6 +1274,13 @@ export default function OrdersPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => handleOpenExchangeModal(order)}
+                        className="text-orange-600 hover:text-orange-800"
+                        title="Exchange Order"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </button>
                       <button
                         onClick={() => handleEditOrder(order)}
                         className="text-blue-600 hover:text-blue-800"
@@ -1301,6 +1702,249 @@ export default function OrdersPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exchange Order Modal */}
+      {showExchangeModal && exchangeData.order && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+          onClick={() => {
+            setShowExchangeModal(false)
+            setExchangeData({
+              order: null,
+              originalOrderDetails: [],
+              newProduct: {
+                product_id: '',
+                product_name: '',
+                size: '',
+                quantity: 1,
+                price_per_piece: 0,
+                total_price: 0
+              }
+            })
+          }}
+        >
+          <div 
+            className="bg-card border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto mx-2 sm:mx-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center p-6 border-b border-border bg-orange-50 dark:bg-orange-900/20">
+              <div>
+                <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+                  <RefreshCw className="h-5 w-5 text-orange-600" />
+                  Exchange Order #{exchangeData.order.order_number}
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Change the product or size for this order
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowExchangeModal(false)
+                  setExchangeData({
+                    order: null,
+                    originalOrderDetails: [],
+                    newProduct: {
+                      product_id: '',
+                      product_name: '',
+                      size: '',
+                      quantity: 1,
+                      price_per_piece: 0,
+                      total_price: 0
+                    }
+                  })
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close modal"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="p-6">
+              {/* Original Order Details */}
+              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                <h3 className="text-sm font-medium text-red-800 dark:text-red-200 mb-3 flex items-center gap-2">
+                  <span className="text-lg">❌</span> Original Order (To Be Returned)
+                </h3>
+                <div className="space-y-2">
+                  {exchangeData.originalOrderDetails.map((order, index) => (
+                    <div key={index} className="flex justify-between items-center text-sm">
+                      <div>
+                        <span className="font-medium">{(order.products as any)?.name || 'Unknown Product'}</span>
+                        <span className="text-muted-foreground ml-2">Size: {order.sizes}</span>
+                        <span className="text-muted-foreground ml-2">Qty: {order.quantity}</span>
+                      </div>
+                      <span className="font-medium">AED {order.total_price.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="pt-2 border-t border-red-300 dark:border-red-700 flex justify-between">
+                    <span className="font-medium text-red-800 dark:text-red-200">Original Total:</span>
+                    <span className="font-bold text-red-600">
+                      AED {exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* New Product Selection */}
+              <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                <h3 className="text-sm font-medium text-green-800 dark:text-green-200 mb-3 flex items-center gap-2">
+                  <span className="text-lg">✅</span> New Product (Exchange To)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Product
+                    </label>
+                    <select
+                      value={exchangeData.newProduct.product_id}
+                      onChange={(e) => handleExchangeProductChange(e.target.value)}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
+                      required
+                    >
+                      <option value="">Select Product</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id.toString()}>
+                          {product.name} (Available: {product.quantity})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Size
+                    </label>
+                    <select
+                      value={exchangeData.newProduct.size}
+                      onChange={(e) => handleExchangeSizeChange(e.target.value)}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
+                      required
+                      disabled={!exchangeData.newProduct.product_id}
+                    >
+                      <option value="">Select Size</option>
+                      {exchangeData.newProduct.product_id && getAvailableSizes(exchangeData.newProduct.product_id).map((variant) => (
+                        <option key={variant.id} value={variant.size}>
+                          {variant.size} (Available: {variant.quantity})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Quantity
+                    </label>
+                    <input
+                      type="number"
+                      value={exchangeData.newProduct.quantity}
+                      onChange={(e) => handleExchangeQuantityChange(parseInt(e.target.value) || 1)}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
+                      min="1"
+                      max={exchangeData.newProduct.size ? getAvailableQuantity(exchangeData.newProduct.product_id, exchangeData.newProduct.size) : 1}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Price Per Piece
+                    </label>
+                    <div className="w-full px-3 py-2 border border-input bg-muted rounded-md text-foreground">
+                      AED {exchangeData.newProduct.price_per_piece.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 pt-2 border-t border-green-300 dark:border-green-700 flex justify-between">
+                  <span className="font-medium text-green-800 dark:text-green-200">New Total:</span>
+                  <span className="font-bold text-green-600">
+                    AED {exchangeData.newProduct.total_price.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Price Difference Summary */}
+              <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-3">
+                  Exchange Summary
+                </h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Original Order Total:</span>
+                    <span>AED {exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>New Order Total:</span>
+                    <span>AED {exchangeData.newProduct.total_price.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-amber-300 dark:border-amber-700 font-bold">
+                    <span>Price Difference:</span>
+                    <span className={
+                      exchangeData.newProduct.total_price - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) >= 0 
+                        ? 'text-green-600' 
+                        : 'text-red-600'
+                    }>
+                      {exchangeData.newProduct.total_price - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) >= 0 ? '+' : ''}
+                      AED {(exchangeData.newProduct.total_price - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0)).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                {exchangeData.newProduct.total_price !== exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) && (
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                    {exchangeData.newProduct.total_price > exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0)
+                      ? '💰 Customer owes additional payment (paid by cash - no payment fees on difference)'
+                      : '💸 Customer is owed a refund'}
+                  </p>
+                )}
+              </div>
+
+              {/* What will happen */}
+              <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
+                  What will happen when you confirm:
+                </h3>
+                <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
+                  <li>✓ Original product quantities will be restored to inventory</li>
+                  <li>✓ New product quantities will be deducted from inventory</li>
+                  <li>✓ Order will be updated with new product details</li>
+                  <li>✓ Payment fees will remain from original order (no fees on cash difference)</li>
+                  <li>✓ Profits will be automatically recalculated</li>
+                  <li>✓ Exchange notification email will be sent</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={handleExchangeSubmit}
+                  disabled={!exchangeData.newProduct.product_id || !exchangeData.newProduct.size}
+                  className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Confirm Exchange
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowExchangeModal(false)
+                    setExchangeData({
+                      order: null,
+                      originalOrderDetails: [],
+                      newProduct: {
+                        product_id: '',
+                        product_name: '',
+                        size: '',
+                        quantity: 1,
+                        price_per_piece: 0,
+                        total_price: 0
+                      }
+                    })
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>

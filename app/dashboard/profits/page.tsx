@@ -308,8 +308,10 @@ export default function ProfitsPage() {
   // Get investor details for expenses and shipments
   const shadyExpenses = expenses.filter(expense => expense.paid_by === '60c7d737-092a-46cb-a716-fd8f3a40dc1d')
   const tamerExpenses = expenses.filter(expense => expense.paid_by === 'ec524300-de3e-44a7-895e-3f5b5718cccf')
+  const ordersAmountExpenses = expenses.filter(expense => expense.paid_by === 'orders_amount')
   const shadyShipments = shipments.filter(shipment => shipment.paid_by === '60c7d737-092a-46cb-a716-fd8f3a40dc1d')
   const tamerShipments = shipments.filter(shipment => shipment.paid_by === 'ec524300-de3e-44a7-895e-3f5b5718cccf')
+  const ordersAmountShipments = shipments.filter(shipment => shipment.paid_by === 'orders_amount')
   
   // Calculate total amount shared for each investor (shipments + expenses)
   // This should match the calculation in shipments page exactly
@@ -317,6 +319,11 @@ export default function ProfitsPage() {
                            shadyShipments.reduce((sum, ship) => sum + ship.cost, 0)
   const tamerTotalShared = tamerExpenses.reduce((sum, exp) => sum + exp.amount, 0) + 
                            tamerShipments.reduce((sum, ship) => sum + ship.cost, 0)
+  
+  // Calculate orders amount paid expenses and shipments (deducted from orders revenue)
+  const ordersAmountTotalExpenses = ordersAmountExpenses.reduce((sum, exp) => sum + exp.amount, 0)
+  const ordersAmountTotalShipments = ordersAmountShipments.reduce((sum, ship) => sum + ship.cost, 0)
+  const ordersAmountTotalPaid = ordersAmountTotalExpenses + ordersAmountTotalShipments
   
   // Calculate total amount for each investor (profit share + what they shared)
   const shadyTotalAmount = Math.max(0, shadyShare) + shadyTotalShared
@@ -485,7 +492,7 @@ export default function ProfitsPage() {
               Expenses: {formatCurrency(shadyExpenses.reduce((sum, exp) => sum + exp.amount, 0))}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Debug: {shadyShipments.length} shipments, {shadyExpenses.length} expenses
+              {shadyShipments.length} shipments, {shadyExpenses.length} expenses
             </p>
         </div>
         
@@ -497,7 +504,7 @@ export default function ProfitsPage() {
               Expenses: {formatCurrency(tamerExpenses.reduce((sum, exp) => sum + exp.amount, 0))}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Debug: {tamerShipments.length} shipments, {tamerExpenses.length} expenses
+              {tamerShipments.length} shipments, {tamerExpenses.length} expenses
             </p>
           </div>
         </div>
