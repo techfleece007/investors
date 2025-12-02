@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter, RefreshCw } from 'lucide-react'
+import { Plus, ShoppingCart, Calendar, DollarSign, X, CheckCircle, Trash2, Edit, Filter, RefreshCw, Download } from 'lucide-react'
 import { calculatePaymentFees } from '@/lib/utils/paymentFees'
 import { sendOrderEmail } from '@/lib/utils/order-email'
 import DateFilter from '@/components/DateFilter'
@@ -412,6 +412,16 @@ export default function OrdersPage() {
 
       // Create separate order row for each product
       for (const item of orderItems) {
+        // Get product and variant to store cost and price at order time
+        const product = products.find(p => p.id.toString() === item.product_id)
+        const variant = productVariants.find(v => 
+          v.product_id.toString() === item.product_id && v.size === item.size
+        )
+        
+        // Use variant cost if available, otherwise product cost
+        const costPerPiece = variant?.cost || product?.cost_per_piece || 0
+        const pricePerPiece = item.price_per_piece || variant?.price || product?.price_per_piece || 0
+        
         const { error: orderError } = await supabase
           .from('orders')
           .insert({
@@ -425,15 +435,14 @@ export default function OrdersPage() {
             payment_method: formData.payment_method,
             payment_fees: formData.payment_fees / orderItems.length, // Distribute fees across products
             delivery_fees: formData.delivery_fees / orderItems.length, // Distribute fees across products
-            status: formData.status
+            status: formData.status,
+            cost_per_piece: costPerPiece, // Store cost at order time
+            price_per_piece: pricePerPiece // Store price at order time
           })
 
         if (orderError) throw orderError
 
-        // Update product variant quantity
-        const variant = productVariants.find(v => 
-          v.product_id.toString() === item.product_id && v.size === item.size
-        )
+        // Update product variant quantity (reuse the variant variable already declared above)
         if (variant) {
           await supabase
             .from('product_variants')
@@ -441,8 +450,7 @@ export default function OrdersPage() {
             .eq('id', variant.id)
         }
         
-        // Update product total quantity
-        const product = products.find(p => p.id.toString() === item.product_id)
+        // Update product total quantity (reuse the product variable already declared above)
         if (product) {
           await supabase
             .from('products')
@@ -506,6 +514,41 @@ export default function OrdersPage() {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const handleDownload = () => {
+    // Prepare CSV data
+    const headers = ['Order Number', 'Shipping Number', 'Product', 'Sizes', 'Quantity', 'Total Price', 'Payment Method', 'Payment Fees', 'Delivery Fees', 'Status', 'Date']
+    const rows = filteredOrders.map(order => [
+      order.order_number,
+      order.shipping_number,
+      order.product_name,
+      order.sizes,
+      order.quantity,
+      order.total_price,
+      order.payment_method,
+      order.payment_fees,
+      order.delivery_fees,
+      order.status,
+      formatDate(order.created_at)
+    ])
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n')
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `orders_${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const handleEditOrder = async (order: Order) => {
@@ -994,24 +1037,33 @@ export default function OrdersPage() {
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Orders</h1>
           <p className="text-sm sm:text-base text-muted-foreground">Track your product orders and inventory</p>
         </div>
-        <button
-          onClick={() => {
-            setShowAddModal(true)
-            // Automatically add one order item when opening the modal
-            setOrderItems([{
-              product_id: '',
-              product_name: '',
-              size: '',
-              quantity: 1,
-              price_per_piece: 0,
-              total_price: 0
-            }])
-          }}
-          className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          New Order
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleDownload}
+            className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Download
+          </button>
+          <button
+            onClick={() => {
+              setShowAddModal(true)
+              // Automatically add one order item when opening the modal
+              setOrderItems([{
+                product_id: '',
+                product_name: '',
+                size: '',
+                quantity: 1,
+                price_per_piece: 0,
+                total_price: 0
+              }])
+            }}
+            className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            New Order
+          </button>
+        </div>
       </div>
 
       {/* Success Notification */}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { TrendingUp, DollarSign } from 'lucide-react'
+import { TrendingUp, DollarSign, Download } from 'lucide-react'
 import DateFilter from '@/components/DateFilter'
 
 interface Profit {
@@ -76,33 +76,38 @@ export default function ProfitsPage() {
       if (ordersError) throw ordersError
 
       // Transform orders data to match the expected format
-      const transformedProfits = ordersData.map(order => ({
-        id: `order-${order.id}`,
-        order_id: order.id,
-        investor_id: 'shady', // We'll calculate this based on the order
-        gross_profit: 0, // Not used in our calculation
-        net_profit: 0, // Not used in our calculation
-        created_at: order.created_at,
-        product_name: order.products?.name || 'Unknown Product',
-        sizes: order.sizes || 'Unknown Size',
-        quantity: order.quantity || 0,
-        order_number: order.order_number || 0,
-        investor_name: 'Unknown Investor', // Not used in our calculation
-        orders: {
-          product_id: order.product_id,
-          sizes: order.sizes,
-          quantity: order.quantity,
-          order_number: order.order_number,
-          total_price: order.total_price,
-          status: order.status,
-          delivery_fees: order.delivery_fees,
-          payment_fees: order.payment_fees,
-          products: {
-            name: order.products?.name,
-            cost_per_piece: order.products?.cost_per_piece
+      const transformedProfits = ordersData.map(order => {
+        // Use stored cost_per_piece from order if available, otherwise fall back to product cost
+        const costPerPiece = order.cost_per_piece ?? order.products?.cost_per_piece ?? 0
+        
+        return {
+          id: `order-${order.id}`,
+          order_id: order.id,
+          investor_id: 'shady', // We'll calculate this based on the order
+          gross_profit: 0, // Not used in our calculation
+          net_profit: 0, // Not used in our calculation
+          created_at: order.created_at,
+          product_name: order.products?.name || 'Unknown Product',
+          sizes: order.sizes || 'Unknown Size',
+          quantity: order.quantity || 0,
+          order_number: order.order_number || 0,
+          investor_name: 'Unknown Investor', // Not used in our calculation
+          orders: {
+            product_id: order.product_id,
+            sizes: order.sizes,
+            quantity: order.quantity,
+            order_number: order.order_number,
+            total_price: order.total_price,
+            status: order.status,
+            delivery_fees: order.delivery_fees,
+            payment_fees: order.payment_fees,
+            products: {
+              name: order.products?.name,
+              cost_per_piece: costPerPiece // Use stored cost at order time
+            }
           }
         }
-      }))
+      })
 
       setProfits(transformedProfits)
     } catch (error) {
@@ -338,6 +343,44 @@ export default function ProfitsPage() {
     }).format(amount)
   }
 
+  const handleDownload = () => {
+    // Prepare CSV data
+    const headers = ['Order Number', 'Product', 'Sizes', 'Quantity', 'Total Price', 'Cost per Piece', 'Payment Fees', 'Delivery Fees', 'Status', 'Date']
+    const rows = filteredProfits.map(profit => [
+      profit.order_number,
+      profit.product_name,
+      profit.sizes,
+      profit.quantity,
+      profit.orders?.total_price || 0,
+      profit.orders?.products?.cost_per_piece || 0,
+      profit.orders?.payment_fees || 0,
+      profit.orders?.delivery_fees || 0,
+      profit.orders?.status || '',
+      new Date(profit.created_at).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      })
+    ])
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n')
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `profits_${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -348,9 +391,18 @@ export default function ProfitsPage() {
 
   return (
     <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Profits</h1>
-          <p className="text-muted-foreground">Track your profit distribution and performance</p>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Profits</h1>
+            <p className="text-muted-foreground">Track your profit distribution and performance</p>
+          </div>
+          <button
+            onClick={handleDownload}
+            className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Download
+          </button>
         </div>
 
         {/* Date Filter */}

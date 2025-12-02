@@ -113,11 +113,17 @@ async function handleRequest(
     // Get response body
     const responseBody = await response.text()
 
+    // Handle 204 No Content status - NextResponse doesn't accept 204, so use 200 instead
+    const status = response.status === 204 ? 200 : response.status
+
     // Create response with proper headers
-    const nextResponse = new NextResponse(responseBody, {
-      status: response.status,
-      statusText: response.statusText,
-    })
+    const nextResponse = new NextResponse(
+      response.status === 204 ? null : responseBody, // No body for 204
+      {
+        status: status,
+        statusText: response.statusText,
+      }
+    )
 
     // Copy content-type header - important for JSON parsing
     const contentType = response.headers.get('content-type')

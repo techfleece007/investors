@@ -61,7 +61,7 @@ export default function ExpensesPage() {
       const transformedExpenses = data.map(expense => ({
         ...expense,
         investor_name: expense.paid_by === 'orders_amount' 
-          ? 'Capital' 
+          ? 'Orders Amount' 
           : (expense.investors?.name || 'Unknown')
       }))
       
@@ -286,28 +286,6 @@ export default function ExpensesPage() {
           Expenses by Payer
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Capital Card */}
-          {(() => {
-            const capitalExpenses = expenses.filter(expense => expense.paid_by === 'orders_amount')
-            const totalAmount = capitalExpenses.reduce((sum, expense) => sum + expense.amount, 0)
-            
-            return (
-              <div className="bg-muted/30 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-800">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-medium text-foreground">Capital</h4>
-                    <p className="text-sm text-muted-foreground">{capitalExpenses.length} expenses</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-blue-600">AED {totalAmount.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {totalExpenses > 0 ? ((totalAmount / totalExpenses) * 100).toFixed(1) : 0}% of total
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
           {investors.map(investor => {
             const investorExpenses = expenses.filter(expense => expense.paid_by === investor.id)
             const totalAmount = investorExpenses.reduce((sum, expense) => sum + expense.amount, 0)
@@ -533,7 +511,7 @@ export default function ExpensesPage() {
                     required
                   >
                     <option value="">Select who paid</option>
-                    <option value="orders_amount">Capital</option>
+                    <option value="orders_amount">Orders Amount</option>
                     {investors.map((investor) => (
                       <option key={investor.id} value={investor.id}>
                         {investor.name}

@@ -52,7 +52,8 @@ export default function ShipmentsPage() {
   const [shipmentItems, setShipmentItems] = useState<Array<{
     product_variant_id: string,
     quantity: number,
-    cost_per_piece: number
+    cost_per_piece: number,
+    price: number
   }>>([])
   const [investors, setInvestors] = useState<{id: string, name: string}[]>([])
   const [productVariants, setProductVariants] = useState<Array<{
@@ -106,7 +107,7 @@ export default function ShipmentsPage() {
       const transformedShipments = data.map(shipment => ({
         ...shipment,
         investor_name: shipment.paid_by === 'orders_amount' 
-          ? 'Capital' 
+          ? 'Orders Amount' 
           : (shipment.investors?.name || 'Unknown')
       }))
       
@@ -247,25 +248,52 @@ export default function ShipmentsPage() {
             shipment_id: shipmentData.id,
             quantity: item.quantity,
             cost_per_piece: item.cost_per_piece
+            // Note: price is stored in product_variants table, not variant_shipments
           }))
 
-          const { error: variantError } = await supabase
+          const { data: variantShipmentsResult, error: variantError } = await supabase
             .from('variant_shipments')
             .insert(variantShipmentsData)
+            .select()
 
-          if (variantError) throw variantError
+          if (variantError) {
+            console.error('Error inserting variant_shipments:', variantError)
+            throw variantError
+          }
 
-          // Update product_variants with new quantities and costs
+          // Update product_variants with new quantities, calculate weighted average cost, and update price if provided
           for (const item of shipmentItems) {
             const variant = productVariants.find(v => v.id === item.product_variant_id)
             if (variant) {
+              // Calculate weighted average cost from all variant_shipments
+              const { data: allShipments, error: shipmentsError } = await supabase
+                .from('variant_shipments')
+                .select('quantity, cost_per_piece')
+                .eq('product_variant_id', item.product_variant_id)
+
+              let weightedAvgCost = item.cost_per_piece
+              if (!shipmentsError && allShipments && allShipments.length > 0) {
+                // Calculate weighted average: sum(quantity * cost) / sum(quantity)
+                const totalCost = allShipments.reduce((sum, s) => sum + (s.quantity * s.cost_per_piece), 0)
+                const totalQuantity = allShipments.reduce((sum, s) => sum + s.quantity, 0)
+                weightedAvgCost = totalQuantity > 0 ? totalCost / totalQuantity : item.cost_per_piece
+              }
+
+              // Prepare update data
+              const updateData: any = {
+                quantity: variant.quantity + item.quantity,
+                cost: weightedAvgCost, // Use weighted average cost from all shipments
+                shipment_id: shipmentData.id
+              }
+
+              // Update price if provided (new sell price for this stock)
+              if (item.price && item.price > 0) {
+                updateData.price = item.price
+              }
+
               await supabase
                 .from('product_variants')
-                .update({
-                  quantity: variant.quantity + item.quantity,
-                  cost: item.cost_per_piece,
-                  shipment_id: shipmentData.id
-                })
+                .update(updateData)
                 .eq('id', item.product_variant_id)
             }
           }
@@ -320,7 +348,8 @@ export default function ShipmentsPage() {
     setShipmentItems(prev => [...prev, {
       product_variant_id: '',
       quantity: 0,
-      cost_per_piece: 0
+      cost_per_piece: 0,
+      price: 0
     }])
   }
 
@@ -332,6 +361,22 @@ export default function ShipmentsPage() {
     setShipmentItems(prev => {
       const updated = [...prev]
       updated[index] = { ...updated[index], [field]: value }
+      
+      // When variant is selected, pre-fill price and cost if not already set
+      if (field === 'product_variant_id' && value) {
+        const variant = productVariants.find(v => v.id === value)
+        if (variant) {
+          // Pre-fill cost if not set, otherwise keep user's input
+          if (!updated[index].cost_per_piece || updated[index].cost_per_piece === 0) {
+            updated[index].cost_per_piece = variant.cost || 0
+          }
+          // Pre-fill price if not set, otherwise keep user's input
+          if (!updated[index].price || updated[index].price === 0) {
+            updated[index].price = variant.price || 0
+          }
+        }
+      }
+      
       return updated
     })
   }
@@ -387,30 +432,6 @@ export default function ShipmentsPage() {
           Shipment Costs by Payer
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Capital Card */}
-          {(() => {
-            const capitalShipments = shipments.filter(shipment => shipment.paid_by === 'orders_amount')
-            const totalAmount = capitalShipments.reduce((sum, shipment) => sum + shipment.cost, 0)
-            const totalShipmentsCost = shipments.reduce((sum, s) => sum + s.cost, 0)
-            
-            return (
-              <div className="bg-muted/30 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-800">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-medium text-foreground">Capital</h4>
-                    <p className="text-sm text-muted-foreground">{capitalShipments.length} shipments</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-blue-600">AED {totalAmount.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {totalShipmentsCost > 0 ? 
-                        ((totalAmount / totalShipmentsCost) * 100).toFixed(1) : 0}% of total
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
           {investors.map(investor => {
             const investorShipments = shipments.filter(shipment => shipment.paid_by === investor.id)
             const totalAmount = investorShipments.reduce((sum, shipment) => sum + shipment.cost, 0)
@@ -742,7 +763,7 @@ export default function ShipmentsPage() {
                       required
                     >
                       <option value="">Select who paid</option>
-                      <option value="orders_amount">Capital</option>
+                      <option value="orders_amount">Orders Amount</option>
                       {investors.map((investor) => (
                         <option key={investor.id} value={investor.id}>
                           {investor.name}
@@ -869,6 +890,21 @@ export default function ShipmentsPage() {
                                 min="0"
                                 value={item.cost_per_piece}
                                 onChange={(e) => updateShipmentItem(index, 'cost_per_piece', parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                                placeholder="0.00"
+                              />
+                            </div>
+                            
+                            <div>
+                              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                                Sell Price (Optional)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={item.price || ''}
+                                onChange={(e) => updateShipmentItem(index, 'price', parseFloat(e.target.value) || 0)}
                                 className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
                                 placeholder="0.00"
                               />
