@@ -121,3 +121,6 @@ WHERE cost_per_piece IS NULL OR price_per_piece IS NULL;
 -- If there are still NULL values, investigate why and fix manually
 -- =====================================================
 
+
+
+

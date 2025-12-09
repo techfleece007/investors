@@ -784,15 +784,20 @@ export default function ProfitsPage() {
       {Object.keys(exchangedOrdersMap).length > 0 && (() => {
         const exchangedOrdersList = Object.entries(exchangedOrdersMap)
           .filter(([orderNumber, profits]) => {
+            // Include if at least one order in the exchange is completed
+            // (original might be canceled, but exchanged should be completed)
             return profits.some(p => {
               const status = p.orders?.status
               return status === 'completed' || (!status && p.orders)
             })
           })
           .map(([orderNumber, profits]) => {
-            const originalOrder = profits[0]
-            const exchangedOrder = profits[profits.length - 1]
+            // Find original order (first one, might be canceled)
+            const originalOrder = profits.find(p => p.orders?.status === 'canceled') || profits[0]
+            // Find exchanged order (should be completed, or the most recent one)
+            const exchangedOrder = profits.find(p => p.orders?.status === 'completed') || profits[profits.length - 1]
             const exchangedStatus = exchangedOrder.orders?.status
+            // Only show if exchanged order is completed
             if (exchangedStatus === 'canceled') return null
             
             return {

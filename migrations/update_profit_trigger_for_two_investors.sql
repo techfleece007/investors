@@ -96,3 +96,6 @@ $$ LANGUAGE plpgsql;
 
 -- The trigger is already created, it will use the updated function automatically
 
+
+
+

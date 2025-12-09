@@ -13,3 +13,6 @@ ADD COLUMN IF NOT EXISTS price_per_piece DECIMAL(10,2);
 COMMENT ON COLUMN profits.cost_per_piece IS 'Cost per piece at the time of order creation. Used for accurate profit calculations.';
 COMMENT ON COLUMN profits.price_per_piece IS 'Price per piece at the time of order creation. Used for accurate profit calculations.';
 
+
+
+

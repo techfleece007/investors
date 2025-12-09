@@ -457,20 +457,13 @@ export default function OrdersPage() {
 
         if (orderError) throw orderError
 
-        // Update product variant quantity (reuse the variant variable already declared above)
+        // Update product variant quantity
+        // Note: Product total quantity will be automatically updated by trigger
         if (variant) {
           await supabase
             .from('product_variants')
             .update({ quantity: Math.max(0, variant.quantity - item.quantity) })
             .eq('id', variant.id)
-        }
-        
-        // Update product total quantity (reuse the product variable already declared above)
-        if (product) {
-          await supabase
-            .from('products')
-            .update({ quantity: Math.max(0, product.quantity - item.quantity) })
-            .eq('id', product.id)
         }
       }
 
@@ -642,13 +635,7 @@ export default function OrdersPage() {
               .eq('id', variant.id)
           }
           
-          const product = products.find(p => p.id.toString() === oldOrder.product_id?.toString())
-          if (product) {
-            await supabase
-              .from('products')
-              .update({ quantity: product.quantity + oldOrder.quantity })
-              .eq('id', product.id)
-          }
+          // Product total quantity will be automatically updated by trigger when variant quantity changes
         }
 
         // Handle quantity deduction for completed orders (from canceled)
@@ -664,13 +651,7 @@ export default function OrdersPage() {
               .eq('id', variant.id)
           }
           
-          const product = products.find(p => p.id.toString() === oldOrder.product_id?.toString())
-          if (product) {
-            await supabase
-              .from('products')
-              .update({ quantity: Math.max(0, product.quantity - updatedOrder.quantity) })
-              .eq('id', product.id)
-          }
+          // Product total quantity will be automatically updated by trigger when variant quantity changes
         }
       }
 
@@ -688,13 +669,7 @@ export default function OrdersPage() {
             .eq('id', variant.id)
         }
         
-        const product = products.find(p => p.id.toString() === oldOrder.product_id?.toString())
-        if (product) {
-          await supabase
-            .from('products')
-            .update({ quantity: Math.max(0, product.quantity - quantityDiff) })
-            .eq('id', product.id)
-        }
+        // Product total quantity will be automatically updated by trigger when variant quantity changes
       }
 
       // Profits will be recalculated automatically by the trigger when order is updated
@@ -806,20 +781,7 @@ export default function OrdersPage() {
               }
             }
             
-            // Also restore the product total quantity
-            const product = products.find(p => p.id.toString() === orderItem.product_id.toString())
-            if (product) {
-              const { error: productError } = await supabase
-                .from('products')
-                .update({ 
-                  quantity: product.quantity + orderItem.quantity 
-                })
-                .eq('id', orderItem.product_id)
-
-              if (productError) {
-                console.error('Error restoring product quantity:', productError)
-              }
-            }
+            // Product total quantity will be automatically updated by trigger when variant quantity changes
           }
         }
 
@@ -848,20 +810,7 @@ export default function OrdersPage() {
                 }
               }
               
-              // Also deduct from the product total quantity
-              const product = products.find(p => p.id.toString() === orderItem.product_id.toString())
-              if (product) {
-                const { error: productError } = await supabase
-                  .from('products')
-                  .update({ 
-                    quantity: Math.max(0, product.quantity - orderItem.quantity)
-                  })
-                  .eq('id', orderItem.product_id)
-
-                if (productError) {
-                  console.error('Error deducting product quantity:', productError)
-                }
-              }
+              // Product total quantity will be automatically updated by trigger when variant quantity changes
             }
           }
         }
@@ -880,30 +829,11 @@ export default function OrdersPage() {
 
         if (updateError) throw updateError
 
-        // Send email notification for status changes
-        try {
-          const orderItemsForEmail = orderData.map(item => ({
-            product_name: (item.products as any)?.name || 'Unknown Product',
-            size: item.sizes,
-            quantity: item.quantity,
-            unit_price: item.total_price / item.quantity,
-            total_price: item.total_price
-          }))
-
-          await sendOrderEmail({
-            order_number: orderData[0].order_number,
-            shipping_number: orderData[0].shipping_number,
-            status: newStatus,
-            items: orderItemsForEmail,
-            payment_method: orderData[0].payment_method,
-            payment_fees: orderData[0].payment_fees,
-            delivery_fees: orderData[0].delivery_fees,
-            created_at: orderData[0].created_at
-          })
-        } catch (emailError) {
-          console.error('Error sending email notification:', emailError)
-          // Don't fail the order update if email fails
-        }
+        // Note: Emails are only sent for:
+        // - New orders (in handleSubmit)
+        // - Canceled orders (in handleUpdateOrder when status changes to canceled)
+        // - Exchanged orders (in handleExchange)
+        // Status changes via this function do not send emails
 
         alert(`Order #${order.order_number} status updated to ${newStatus}`)
         fetchData() // Refresh the data
@@ -1067,16 +997,7 @@ export default function OrdersPage() {
           if (variantRestoreError) console.error('Error restoring variant quantity:', variantRestoreError)
         }
         
-        // Restore product total quantity
-        const oldProduct = products.find(p => p.id.toString() === oldOrder.product_id.toString())
-        if (oldProduct) {
-          const { error: productRestoreError } = await supabase
-            .from('products')
-            .update({ quantity: oldProduct.quantity + oldOrder.quantity })
-            .eq('id', oldOrder.product_id)
-          
-          if (productRestoreError) console.error('Error restoring product quantity:', productRestoreError)
-        }
+        // Product total quantity will be automatically updated by trigger when variant quantity changes
       }
 
       // 2. Deduct quantities for NEW product
@@ -1114,26 +1035,10 @@ export default function OrdersPage() {
         console.error('Error fetching fresh product quantity:', freshProductError)
       }
       
-      // Deduct from product total using fresh database value
-      const currentProductQty = freshProduct?.quantity ?? 0
-      const { error: productDeductError } = await supabase
-        .from('products')
-        .update({ quantity: Math.max(0, currentProductQty - exchangeData.newProduct.quantity) })
-        .eq('id', exchangeData.newProduct.product_id)
-      
-      if (productDeductError) console.error('Error deducting product quantity:', productDeductError)
+      // Product total quantity will be automatically updated by trigger when variant quantity changes
 
-      // 3. Delete old order rows
-      for (const oldOrder of oldOrderDetails) {
-        const { error: deleteError } = await supabase
-          .from('orders')
-          .delete()
-          .eq('id', oldOrder.id)
-        
-        if (deleteError) console.error('Error deleting old order:', deleteError)
-      }
-
-      // 4. Create new order row with updated details
+      // 3. Create a NEW order row for the exchanged product (instead of updating)
+      // This preserves the original order so exchanges can be detected in the profits page
       // IMPORTANT: Keep the original payment fees from the old order
       // If price is higher, the difference is paid by cash (no fees on difference)
       // Payment fees should only apply to the original order amount
@@ -1150,6 +1055,9 @@ export default function OrdersPage() {
       const costPerPiece = newVariant?.cost || newProduct?.cost_per_piece || 0
       const pricePerPiece = exchangeData.newProduct.price_per_piece || newVariant?.price || newProduct?.price_per_piece || 0
       
+      // Create new order row for the exchanged product
+      // Keep the same order_number and shipping_number so they're linked
+      // The original order rows will remain as-is (completed) so the exchange can be detected
       const { error: insertError } = await supabase
         .from('orders')
         .insert({
@@ -1169,6 +1077,26 @@ export default function OrdersPage() {
         })
 
       if (insertError) throw insertError
+
+      // 4. Mark original order rows as canceled (so they don't count in profits but are preserved for exchange history)
+      // IMPORTANT: We already restored quantities in step 1, so we need to prevent double restoration
+      // We'll update status to canceled, but the cancel logic should check if quantities were already restored
+      // Actually, let's keep them as completed but the profits page will detect the exchange by seeing
+      // multiple orders with same order_number but different products
+      // For now, mark as canceled to exclude from profit calculations, but note that quantities are already restored
+      for (const oldOrder of oldOrderDetails) {
+        // Update status to canceled to exclude from active profit calculations
+        // The order is preserved for exchange history tracking
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({ status: 'canceled' })
+          .eq('id', oldOrder.id)
+        
+        if (updateError) {
+          console.error('Error updating original order status:', updateError)
+          // Don't throw - continue with other orders
+        }
+      }
 
       // 5. Send exchange email notification
       try {

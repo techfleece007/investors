@@ -73,3 +73,6 @@ If you want to simplify your Supabase setup, you can optionally remove these (bu
 
 ✅ **No action required** - Your Supabase setup is correct and working as intended. The profit trigger automatically handles all calculations using the stored cost and price values from orders.
 
+
+
+

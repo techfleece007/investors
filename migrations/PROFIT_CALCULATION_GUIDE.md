@@ -87,3 +87,6 @@ Based on your data:
 - After running the recalculation, all profits should be split 80/20 correctly.
 - The trigger will automatically create both profit records for all new/updated orders.
 
+
+
+
