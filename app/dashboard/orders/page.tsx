@@ -23,6 +23,11 @@ interface Order {
   cost_per_piece?: number
   price_per_piece?: number
   product_id?: string
+  exchange_info?: {
+    original_sizes: string
+    original_products: string
+    exchanged_at: string
+  }
 }
 
 interface Product {
@@ -179,6 +184,28 @@ export default function OrdersPage() {
         const totalOrderValue = group.products.reduce((sum: number, product: any) => sum + product.total_price, 0)
         const productCount = group.products.length
         
+        // Check if this is an exchanged order (sizes field contains "original size:")
+        const firstProductSizes = group.products[0].sizes || ''
+        const isExchanged = firstProductSizes.includes('original size:')
+        
+        // Extract actual size and original size for exchanged orders
+        let displaySizes = productCount === 1 
+          ? group.products[0].sizes 
+          : group.products.map((p: any) => `${p.product_name}: ${p.sizes}`).join('; ')
+        
+        // For exchanged orders, format the display
+        // The sizes field already contains: "ProductName: NewSize; original size: ProductName: OriginalSize"
+        // So we can use it directly
+        if (isExchanged && productCount === 1) {
+          displaySizes = firstProductSizes
+        }
+        
+        // Format status to show "(exchanged)" for exchanged orders
+        let displayStatus = group.status
+        if (isExchanged && group.status === 'completed') {
+          displayStatus = 'completed (exchanged)'
+        }
+        
         return {
           id: group.products[0].id, // Use first product ID as main ID
           order_number: group.order_number,
@@ -186,18 +213,21 @@ export default function OrdersPage() {
           product_name: productCount === 1 
             ? group.products[0].product_name 
             : `${productCount} Products (${group.products.map((p: any) => p.product_name).join(', ')})`,
-          sizes: productCount === 1 
-            ? group.products[0].sizes 
-            : group.products.map((p: any) => `${p.product_name}: ${p.sizes}`).join('; '),
+          sizes: displaySizes,
           quantity: group.products.reduce((sum: number, product: any) => sum + product.quantity, 0),
           total_price: totalOrderValue,
           payment_method: group.payment_method,
           payment_fees: group.products.reduce((sum: number, product: any) => sum + (product.payment_fees || 0), 0),
           delivery_fees: group.products.reduce((sum: number, product: any) => sum + (product.delivery_fees || 0), 0),
-          status: group.status,
+          status: displayStatus, // Use formatted status with "(exchanged)" if applicable
           created_at: group.created_at,
           cost_per_piece: productCount === 1 ? group.products[0].cost_per_piece : undefined, // Show cost only for single product orders
-          price_per_piece: productCount === 1 ? group.products[0].price_per_piece : undefined // Show price only for single product orders
+          price_per_piece: productCount === 1 ? group.products[0].price_per_piece : undefined, // Show price only for single product orders
+          exchange_info: isExchanged ? {
+            original_sizes: firstProductSizes.split('; original size:')[1]?.trim() || '',
+            original_products: firstProductSizes.split('; original size:')[1]?.trim() || '',
+            exchanged_at: group.created_at
+          } : undefined
         }
       })
 
@@ -232,7 +262,13 @@ export default function OrdersPage() {
 
     // Filter by status
     if (filters.status !== 'all') {
-      filtered = filtered.filter(order => order.status === filters.status)
+      filtered = filtered.filter(order => {
+        if (filters.status === 'completed') {
+          // Include both 'completed' and 'completed (exchanged)'
+          return order.status === 'completed' || order.status.startsWith('completed')
+        }
+        return order.status === filters.status
+      })
     }
 
     // Filter by payment method
@@ -457,9 +493,9 @@ export default function OrdersPage() {
 
         if (orderError) throw orderError
 
-        // Update product variant quantity
+        // Update product variant quantity only if order status is pending or completed
         // Note: Product total quantity will be automatically updated by trigger
-        if (variant) {
+        if (variant && (formData.status === 'pending' || formData.status === 'completed')) {
           await supabase
             .from('product_variants')
             .update({ quantity: Math.max(0, variant.quantity - item.quantity) })
@@ -965,13 +1001,44 @@ export default function OrdersPage() {
       return
     }
 
+    // Validate product exists in our local state
+    const newProduct = products.find(p => p.id.toString() === exchangeData.newProduct.product_id)
+    if (!newProduct) {
+      alert(`Product not found. Please refresh the page and try again.`)
+      return
+    }
+
+    // Validate product_id is a valid number
+    const productIdNum = parseInt(exchangeData.newProduct.product_id)
+    if (isNaN(productIdNum)) {
+      alert(`Invalid product ID. Please refresh the page and try again.`)
+      return
+    }
+
+    // Verify product exists in database before proceeding
+    const { data: verifyProduct, error: verifyError } = await supabase
+      .from('products')
+      .select('id, name')
+      .eq('id', productIdNum)
+      .single()
+    
+    if (verifyError || !verifyProduct) {
+      alert(`Product with ID ${productIdNum} does not exist in database. Error: ${verifyError?.message || 'Product not found'}`)
+      return
+    }
+
     // Check if there's enough stock for the new product
     const newVariant = productVariants.find(v => 
       v.product_id.toString() === exchangeData.newProduct.product_id && v.size === exchangeData.newProduct.size
     )
     
-    if (!newVariant || newVariant.quantity < exchangeData.newProduct.quantity) {
-      alert(`Insufficient stock for ${exchangeData.newProduct.product_name} - Size ${exchangeData.newProduct.size}. Available: ${newVariant?.quantity || 0}`)
+    if (!newVariant) {
+      alert(`Variant not found for ${exchangeData.newProduct.product_name} - Size ${exchangeData.newProduct.size}`)
+      return
+    }
+    
+    if (newVariant.quantity < exchangeData.newProduct.quantity) {
+      alert(`Insufficient stock for ${exchangeData.newProduct.product_name} - Size ${exchangeData.newProduct.size}. Available: ${newVariant.quantity}, Requested: ${exchangeData.newProduct.quantity}`)
       return
     }
 
@@ -989,12 +1056,29 @@ export default function OrdersPage() {
         )
         
         if (oldVariant) {
+          // Fetch fresh variant quantity to ensure we're using the latest data
+          const { data: freshOldVariant, error: fetchOldVariantError } = await supabase
+            .from('product_variants')
+            .select('quantity')
+            .eq('id', oldVariant.id)
+            .single()
+          
+          if (fetchOldVariantError) {
+            console.error('Error fetching old variant quantity:', fetchOldVariantError)
+            throw new Error('Failed to fetch old variant quantity for restoration')
+          }
+          
           const { error: variantRestoreError } = await supabase
             .from('product_variants')
-            .update({ quantity: oldVariant.quantity + oldOrder.quantity })
+            .update({ quantity: (freshOldVariant?.quantity ?? oldVariant.quantity) + oldOrder.quantity })
             .eq('id', oldVariant.id)
           
-          if (variantRestoreError) console.error('Error restoring variant quantity:', variantRestoreError)
+          if (variantRestoreError) {
+            console.error('Error restoring variant quantity:', variantRestoreError)
+            throw variantRestoreError
+          }
+        } else {
+          console.warn(`Old variant not found for product ${oldOrder.product_id}, size ${oldOrder.sizes}`)
         }
         
         // Product total quantity will be automatically updated by trigger when variant quantity changes
@@ -1004,7 +1088,8 @@ export default function OrdersPage() {
       // IMPORTANT: Fetch fresh quantities from database to avoid using stale local state
       // This prevents double-deduction issues when exchanging to same product with different size
       
-      // Fetch current variant quantity from database
+      // Fetch current variant quantity from database (after restoring old quantities)
+      // This ensures we have the latest quantity including any restored stock
       const { data: freshVariant, error: freshVariantError } = await supabase
         .from('product_variants')
         .select('quantity')
@@ -1013,32 +1098,37 @@ export default function OrdersPage() {
       
       if (freshVariantError) {
         console.error('Error fetching fresh variant quantity:', freshVariantError)
+        throw new Error('Failed to fetch current variant quantity')
+      }
+      
+      if (!freshVariant) {
+        throw new Error('Variant not found')
+      }
+      
+      // Check stock again with fresh data
+      if (freshVariant.quantity < exchangeData.newProduct.quantity) {
+        throw new Error(`Insufficient stock. Available: ${freshVariant.quantity}, Requested: ${exchangeData.newProduct.quantity}`)
       }
       
       // Deduct from variant using fresh database value
-      const currentVariantQty = freshVariant?.quantity ?? newVariant.quantity
       const { error: variantDeductError } = await supabase
         .from('product_variants')
-        .update({ quantity: Math.max(0, currentVariantQty - exchangeData.newProduct.quantity) })
+        .update({ quantity: Math.max(0, freshVariant.quantity - exchangeData.newProduct.quantity) })
         .eq('id', newVariant.id)
       
-      if (variantDeductError) console.error('Error deducting variant quantity:', variantDeductError)
-      
-      // Fetch current product quantity from database
-      const { data: freshProduct, error: freshProductError } = await supabase
-        .from('products')
-        .select('quantity')
-        .eq('id', exchangeData.newProduct.product_id)
-        .single()
-      
-      if (freshProductError) {
-        console.error('Error fetching fresh product quantity:', freshProductError)
+      if (variantDeductError) {
+        console.error('Error deducting variant quantity:', variantDeductError)
+        throw variantDeductError
       }
       
       // Product total quantity will be automatically updated by trigger when variant quantity changes
 
-      // 3. Create a NEW order row for the exchanged product (instead of updating)
-      // This preserves the original order so exchanges can be detected in the profits page
+      // 3. Prepare exchange information before creating new order
+      // Store original sizes for display in the new order
+      const originalSizes = oldOrderDetails.map(o => `${(o.products as any)?.name || 'Unknown Product'}: ${o.sizes}`).join(', ')
+      
+      // 4. Create a NEW order row for the exchanged product (instead of updating)
+      // This replaces the original order completely
       // IMPORTANT: Keep the original payment fees from the old order
       // If price is higher, the difference is paid by cash (no fees on difference)
       // Payment fees should only apply to the original order amount
@@ -1049,56 +1139,102 @@ export default function OrdersPage() {
       // - If new price > old price: still keep original method (difference paid by cash, but we don't add fees)
       const paymentMethod = oldOrderDetails[0].payment_method
       
-      // Get cost and price for the new product
-      const newProduct = products.find(p => p.id.toString() === exchangeData.newProduct.product_id)
+      // Get cost and price for the new product (already validated above)
+      // newProduct and verifyProduct are already validated and verified in database above
+      // Fetch full product data to get cost_per_piece
+      const { data: fullProductData, error: productDataError } = await supabase
+        .from('products')
+        .select('cost_per_piece, price_per_piece')
+        .eq('id', productIdNum)
+        .single()
+      
+      if (productDataError) {
+        console.error('Error fetching product data:', productDataError)
+        // Use fallback values from local state
+      }
+      
       // newVariant is already declared above, reuse it
-      const costPerPiece = newVariant?.cost || newProduct?.cost_per_piece || 0
-      const pricePerPiece = exchangeData.newProduct.price_per_piece || newVariant?.price || newProduct?.price_per_piece || 0
+      const costPerPiece = newVariant?.cost || fullProductData?.cost_per_piece || newProduct?.cost_per_piece || 0
+      const pricePerPiece = exchangeData.newProduct.price_per_piece || newVariant?.price || fullProductData?.price_per_piece || newProduct?.price_per_piece || 0
       
       // Create new order row for the exchanged product
-      // Keep the same order_number and shipping_number so they're linked
-      // The original order rows will remain as-is (completed) so the exchange can be detected
-      const { error: insertError } = await supabase
+      // Store original sizes in the sizes field with a special format for display
+      // Format: "ProductName: NewSize; original size: ProductName: OriginalSize"
+      const sizesDisplay = `${exchangeData.newProduct.product_name}: ${exchangeData.newProduct.size}; original size: ${originalSizes}`
+      
+      const { data: newOrderData, error: insertError } = await supabase
         .from('orders')
         .insert({
-          product_id: parseInt(exchangeData.newProduct.product_id),
+          product_id: productIdNum,
           order_number: exchangeData.order.order_number,
           shipping_number: exchangeData.order.shipping_number,
           paid_amount: newTotalPrice,
           total_price: newTotalPrice,
           quantity: exchangeData.newProduct.quantity,
-          sizes: exchangeData.newProduct.size,
+          sizes: sizesDisplay, // Store with original size info for display
           payment_method: paymentMethod,
           payment_fees: originalPaymentFees, // Keep original fees, no fees on cash difference
           delivery_fees: oldOrderDetails[0].delivery_fees,
-          status: oldOrderDetails[0].status,
+          status: oldOrderDetails[0].status, // Keep original status (usually 'completed')
           cost_per_piece: costPerPiece, // Store cost at order time
           price_per_piece: pricePerPiece // Store price at order time
         })
+        .select()
+        .single()
 
-      if (insertError) throw insertError
+      if (insertError) {
+        console.error('Error inserting new order:', insertError)
+        // If order insertion fails, we need to rollback the quantity changes
+        // Restore the deducted quantity
+        if (freshVariant) {
+          await supabase
+            .from('product_variants')
+            .update({ quantity: freshVariant.quantity })
+            .eq('id', newVariant.id)
+        }
+        // Restore old order quantities (reverse step 1)
+        for (const oldOrder of oldOrderDetails) {
+          const oldVariant = productVariants.find(v => 
+            v.product_id === oldOrder.product_id && v.size === oldOrder.sizes
+          )
+          if (oldVariant) {
+            const { data: currentOldVariant } = await supabase
+              .from('product_variants')
+              .select('quantity')
+              .eq('id', oldVariant.id)
+              .single()
+            
+            if (currentOldVariant) {
+              await supabase
+                .from('product_variants')
+                .update({ quantity: Math.max(0, currentOldVariant.quantity - oldOrder.quantity) })
+                .eq('id', oldVariant.id)
+            }
+          }
+        }
+        throw insertError
+      }
 
-      // 4. Mark original order rows as canceled (so they don't count in profits but are preserved for exchange history)
-      // IMPORTANT: We already restored quantities in step 1, so we need to prevent double restoration
-      // We'll update status to canceled, but the cancel logic should check if quantities were already restored
-      // Actually, let's keep them as completed but the profits page will detect the exchange by seeing
-      // multiple orders with same order_number but different products
-      // For now, mark as canceled to exclude from profit calculations, but note that quantities are already restored
+      // 5. Delete original order rows (instead of marking as canceled)
+      // This prevents affecting canceled order calculations in profits page
+      // Exchange history is preserved in the email notification
+      // Note: originalSizes is already declared above in step 3
       for (const oldOrder of oldOrderDetails) {
-        // Update status to canceled to exclude from active profit calculations
-        // The order is preserved for exchange history tracking
-        const { error: updateError } = await supabase
+        // Delete the old order - this will automatically:
+        // - Delete associated profit records (via CASCADE)
+        // - Not affect canceled order counts
+        const { error: deleteError } = await supabase
           .from('orders')
-          .update({ status: 'canceled' })
+          .delete()
           .eq('id', oldOrder.id)
         
-        if (updateError) {
-          console.error('Error updating original order status:', updateError)
+        if (deleteError) {
+          console.error('Error deleting original order:', deleteError)
           // Don't throw - continue with other orders
         }
       }
 
-      // 5. Send exchange email notification
+      // 6. Send exchange email notification (skipped in dev mode)
       try {
         const oldItems = oldOrderDetails.map(order => ({
           product_name: (order.products as any)?.name || 'Unknown Product',
@@ -1116,7 +1252,7 @@ export default function OrdersPage() {
           total_price: exchangeData.newProduct.total_price
         }]
 
-        await fetch('/api/send-exchange-email', {
+        const emailResponse = await fetch('/api/send-exchange-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1128,11 +1264,19 @@ export default function OrdersPage() {
             exchange_date: new Date().toISOString()
           })
         })
+        
+        const emailResult = await emailResponse.json()
+        if (emailResult.skipped) {
+          console.log('📧 Email skipped (dev mode): Exchange email would be sent for order #' + exchangeData.order.order_number)
+        }
       } catch (emailError) {
         console.error('Error sending exchange email:', emailError)
         // Don't fail the exchange if email fails
       }
 
+      // Store order number before resetting exchangeData
+      const exchangedOrderNumber = exchangeData.order.order_number
+      
       // Close modal and refresh data
       setShowExchangeModal(false)
       setExchangeData({
@@ -1148,14 +1292,18 @@ export default function OrdersPage() {
         }
       })
       
-      setSuccessMessage(`Order #${exchangeData.order.order_number} exchanged successfully!${priceDifference !== 0 ? ` Price difference: AED ${priceDifference.toFixed(2)}` : ''}`)
+      setSuccessMessage(`Order #${exchangedOrderNumber} exchanged successfully!${priceDifference !== 0 ? ` Price difference: AED ${priceDifference.toFixed(2)}` : ''}`)
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 4000)
       
       fetchData()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing exchange:', error)
-      alert('Error processing exchange. Please try again.')
+      const errorMessage = error?.message || error?.code || 'Unknown error occurred'
+      alert(`Error processing exchange: ${errorMessage}\n\nPlease check the console for more details.`)
+      
+      // Refresh data to show current state
+      fetchData()
     }
   }
 
@@ -1275,7 +1423,7 @@ export default function OrdersPage() {
                   <p className="text-sm text-muted-foreground">Shipping #{order.shipping_number}</p>
                 </div>
                 <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                  order.status === 'completed' ? 'bg-green-100 text-green-800' :
+                  order.status === 'completed' || order.status.startsWith('completed') ? 'bg-green-100 text-green-800' :
                   order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                   'bg-red-100 text-red-800'
                 }`}>
@@ -1292,7 +1440,18 @@ export default function OrdersPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <span className="text-muted-foreground">Size:</span>
-                    <span className="ml-1 font-medium">{order.sizes}</span>
+                    <span className="ml-1 font-medium">
+                      {order.sizes.includes('original size:') ? (
+                        <>
+                          {order.sizes.split('; original size:')[0]}
+                          <span className="text-orange-600 dark:text-orange-400 font-normal">
+                            ; original size: {order.sizes.split('; original size:')[1]}
+                          </span>
+                        </>
+                      ) : (
+                        order.sizes
+                      )}
+                    </span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Quantity:</span>

@@ -288,11 +288,12 @@ export default function ProfitsPage() {
     return acc
   }, {} as Record<number, any>)
 
-  // Identify exchanged orders: orders with same order_number but multiple different products
-  // IMPORTANT: Only show exchanges from December 2025 onwards (when exchange feature was implemented)
+  // Identify exchanged orders: orders with "original size:" in sizes field
+  // This is the new way exchanges are tracked (original orders are deleted, not canceled)
   const exchangeFeatureStartDate = new Date('2025-12-01')
   
-  const orderNumberGroups = filteredProfits.reduce((acc, profit) => {
+  // Find exchanged orders by checking if sizes field contains "original size:"
+  const exchangedOrdersMap = filteredProfits.reduce((acc, profit) => {
     const orderNumber = profit.order_number || profit.orders?.order_number
     if (!orderNumber) return acc
     
@@ -304,29 +305,13 @@ export default function ProfitsPage() {
     // Only include orders from when exchange feature was implemented (December 2025+)
     if (orderDate < exchangeFeatureStartDate) return acc
     
-    if (!acc[orderNumber]) {
-      acc[orderNumber] = []
-    }
-    acc[orderNumber].push(profit)
-    return acc
-  }, {} as Record<number, Profit[]>)
-
-  // Find exchanged orders (order_numbers with multiple different products)
-  // Only include exchanges from December 2025 onwards
-  const exchangedOrdersMap = Object.entries(orderNumberGroups).reduce((acc, [orderNumber, profits]) => {
-    if (profits.length > 1) {
-      // Check if products are different
-      const productIds = new Set(profits.map(p => p.orders?.product_id || '').filter(Boolean))
-      if (productIds.size > 1) {
-        // This is an exchanged order - has multiple different products
-        // (We already filtered by date in orderNumberGroups, so all orders here are from December 2025+)
-        acc[parseInt(orderNumber)] = profits.sort((a, b) => {
-          // Sort by order_id to get original first, then exchanged
-          const idA = parseInt(a.order_id) || 0
-          const idB = parseInt(b.order_id) || 0
-          return idA - idB
-        })
+    // Check if this order is an exchange (sizes field contains "original size:")
+    const sizes = profit.orders?.sizes || profit.sizes || ''
+    if (sizes.includes('original size:')) {
+      if (!acc[orderNumber]) {
+        acc[orderNumber] = []
       }
+      acc[orderNumber].push(profit)
     }
     return acc
   }, {} as Record<number, Profit[]>)
@@ -784,33 +769,64 @@ export default function ProfitsPage() {
       {Object.keys(exchangedOrdersMap).length > 0 && (() => {
         const exchangedOrdersList = Object.entries(exchangedOrdersMap)
           .filter(([orderNumber, profits]) => {
-            // Include if at least one order in the exchange is completed
-            // (original might be canceled, but exchanged should be completed)
+            // Include only completed exchanged orders
             return profits.some(p => {
               const status = p.orders?.status
-              return status === 'completed' || (!status && p.orders)
+              return status === 'completed' || status === 'completed (exchanged)'
             })
           })
           .map(([orderNumber, profits]) => {
-            // Find original order (first one, might be canceled)
-            const originalOrder = profits.find(p => p.orders?.status === 'canceled') || profits[0]
-            // Find exchanged order (should be completed, or the most recent one)
-            const exchangedOrder = profits.find(p => p.orders?.status === 'completed') || profits[profits.length - 1]
+            // Since original orders are deleted, we extract info from sizes field
+            const exchangedOrder = profits.find(p => {
+              const status = p.orders?.status
+              return status === 'completed' || status === 'completed (exchanged)'
+            }) || profits[0]
+            
             const exchangedStatus = exchangedOrder.orders?.status
             // Only show if exchanged order is completed
             if (exchangedStatus === 'canceled') return null
             
+            // Extract original size from sizes field: "ProductName: NewSize; original size: ProductName: OriginalSize"
+            const sizes = exchangedOrder.orders?.sizes || exchangedOrder.sizes || ''
+            let originalSize = 'N/A'
+            let originalProduct = 'Unknown'
+            
+            if (sizes.includes('original size:')) {
+              const parts = sizes.split('; original size:')
+              const originalPart = parts[1]?.trim() || ''
+              // Format: "ProductName: Size"
+              if (originalPart) {
+                const originalParts = originalPart.split(':')
+                if (originalParts.length >= 2) {
+                  originalProduct = originalParts[0].trim()
+                  originalSize = originalParts.slice(1).join(':').trim()
+                } else {
+                  originalSize = originalPart
+                }
+              }
+            }
+            
+            // Extract new size from sizes field
+            const newSizePart = sizes.split('; original size:')[0] || sizes
+            let exchangedSize = newSizePart
+            if (newSizePart.includes(':')) {
+              const newParts = newSizePart.split(':')
+              if (newParts.length >= 2) {
+                exchangedSize = newParts.slice(1).join(':').trim()
+              }
+            }
+            
             return {
               orderNumber: parseInt(orderNumber),
-              originalProduct: originalOrder.product_name || 'Unknown',
-              originalSize: originalOrder.orders?.sizes || originalOrder.sizes || 'N/A',
+              originalProduct: originalProduct,
+              originalSize: originalSize,
               exchangedProduct: exchangedOrder.product_name || 'Unknown',
-              exchangedSize: exchangedOrder.orders?.sizes || exchangedOrder.sizes || 'N/A',
-              originalQty: originalOrder.orders?.quantity || originalOrder.quantity || 0,
+              exchangedSize: exchangedSize,
+              originalQty: 0, // Original order is deleted, we don't have this info
               exchangedQty: exchangedOrder.orders?.quantity || exchangedOrder.quantity || 0,
-              originalPrice: originalOrder.orders?.total_price || 0,
+              originalPrice: 0, // Original order is deleted, we don't have this info
               exchangedPrice: exchangedOrder.orders?.total_price || 0,
-              priceDifference: (exchangedOrder.orders?.total_price || 0) - (originalOrder.orders?.total_price || 0)
+              priceDifference: exchangedOrder.orders?.total_price || 0 // Can't calculate difference without original
             }
           })
           .filter((order): order is NonNullable<typeof order> => order !== null && order !== undefined)
@@ -842,7 +858,13 @@ export default function ProfitsPage() {
                     <tr key={order.orderNumber || 'unknown'} className="border-b border-border/50 hover:bg-muted/30">
                       <td className="p-2 text-foreground font-medium">#{order.orderNumber || 'N/A'}</td>
                       <td className="p-2 text-foreground">{order.originalProduct}</td>
-                      <td className="p-2 text-foreground">{order.originalSize}</td>
+                      <td className="p-2 text-foreground">
+                        {order.originalSize !== 'N/A' ? (
+                          <span className="text-orange-600 dark:text-orange-400">{order.originalSize}</span>
+                        ) : (
+                          'N/A'
+                        )}
+                      </td>
                       <td className="p-2 text-foreground font-medium">{order.exchangedProduct}</td>
                       <td className="p-2 text-foreground">{order.exchangedSize}</td>
                       <td className="p-2 text-right text-foreground">{order.originalQty}</td>
@@ -874,7 +896,13 @@ export default function ProfitsPage() {
                       <div>
                         <span className="text-muted-foreground">Original Product:</span>
                         <p className="font-medium text-foreground">{order.originalProduct}</p>
-                        <p className="text-xs text-muted-foreground">Size: {order.originalSize}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Size: {order.originalSize !== 'N/A' ? (
+                            <span className="text-orange-600 dark:text-orange-400">{order.originalSize}</span>
+                          ) : (
+                            'N/A'
+                          )}
+                        </p>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Exchanged Product:</span>

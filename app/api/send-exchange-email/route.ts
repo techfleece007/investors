@@ -20,6 +20,20 @@ interface ExchangeEmailDetails {
 
 export async function POST(request: NextRequest) {
   try {
+    // Only send emails in production mode
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.ENABLE_EMAILS === 'true'
+    
+    if (!isProduction) {
+      const exchangeDetails: ExchangeEmailDetails = await request.json()
+      console.log('📧 Email skipped (dev mode): Exchange email would be sent for order #' + exchangeDetails.order_number)
+      return NextResponse.json({ 
+        success: true, 
+        messageId: 'skipped-dev-mode',
+        skipped: true,
+        message: 'Email skipped in development mode' 
+      })
+    }
+
     const exchangeDetails: ExchangeEmailDetails = await request.json()
 
     if (!process.env.EMAIL_PASSWORD) {
