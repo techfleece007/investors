@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Calendar, Filter } from 'lucide-react'
 
 interface DateFilterProps {
-  dateFilter: 'all' | 'today' | 'week' | 'month' | 'year' | 'custom'
+  dateFilter: 'all' | 'today' | 'week' | 'month' | 'lastMonth' | 'year' | 'custom'
   customDateFrom: string
   customDateTo: string
   onFilterChange: (filterType: string, value: string) => void
@@ -51,6 +51,7 @@ export default function DateFilter({
             <option value="today">Today</option>
             <option value="week">This Week</option>
             <option value="month">This Month</option>
+            <option value="lastMonth">Last Month</option>
             <option value="year">This Year</option>
             <option value="custom">Custom Range</option>
           </select>

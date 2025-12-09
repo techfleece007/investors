@@ -11,6 +11,8 @@ interface Profit {
   investor_id: string
   gross_profit: number
   net_profit: number
+  cost_per_piece?: number
+  price_per_piece?: number
   created_at: string
   product_name: string
   sizes: string
@@ -20,17 +22,21 @@ interface Profit {
   orders?: {
     product_id: string
     sizes: string
-  quantity: number
+    quantity: number
     order_number: number
     total_price: number
     status: string
     delivery_fees: number
     payment_fees: number
+    created_at?: string
+    cost_per_piece?: number
+    price_per_piece?: number
     products?: {
       name: string
-      cost_per_piece: number
+      cost_per_piece?: number
+      price_per_piece?: number
     }
-  }
+  } | null
 }
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
@@ -42,7 +48,7 @@ export default function ProfitsPage() {
   const [shipments, setShipments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
-    dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'lastMonth' | 'year' | 'custom',
     customDateFrom: '',
     customDateTo: ''
   })
@@ -60,58 +66,91 @@ export default function ProfitsPage() {
 
   const fetchProfits = async () => {
     try {
-      // Fetch orders directly instead of profits table
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
+      // Fetch profits with related order and product data
+      const { data: profitsData, error: profitsError } = await supabase
+        .from('profits')
         .select(`
-          *,
-              products (
-            name,
-            cost_per_piece
+          id,
+          order_id,
+          investor_id,
+          gross_profit,
+          net_profit,
+          cost_per_piece,
+          price_per_piece,
+          created_at,
+          orders (
+            id,
+            product_id,
+            order_number,
+            sizes,
+            quantity,
+            total_price,
+            status,
+            delivery_fees,
+            payment_fees,
+            cost_per_piece,
+            price_per_piece,
+            created_at,
+            products (
+              name,
+              cost_per_piece,
+              price_per_piece
+            )
           )
         `)
-        .in('status', ['completed', 'canceled'])
         .order('created_at', { ascending: false })
 
-      if (ordersError) throw ordersError
+      if (profitsError) {
+        console.error('Error fetching profits:', profitsError)
+        throw profitsError
+      }
 
-      // Transform orders data to match the expected format
-      const transformedProfits = ordersData.map(order => {
-        // Use stored cost_per_piece from order if available, otherwise fall back to product cost
-        const costPerPiece = order.cost_per_piece ?? order.products?.cost_per_piece ?? 0
+      // Transform profits data to match the expected format
+      const transformedProfits = profitsData.map(profit => {
+        const order = profit.orders as any
+        // Use stored cost_per_piece and price_per_piece from profits table (most accurate)
+        // Fall back to order or product if not available
+        const costPerPiece = profit.cost_per_piece ?? order?.cost_per_piece ?? order?.products?.cost_per_piece ?? 0
+        const pricePerPiece = profit.price_per_piece ?? order?.price_per_piece ?? order?.products?.price_per_piece ?? 0
+        
+        // Ensure we have valid order data - if orders is null, we still need to show the profit
         
         return {
-          id: `order-${order.id}`,
-          order_id: order.id,
-          investor_id: 'shady', // We'll calculate this based on the order
-          gross_profit: 0, // Not used in our calculation
-          net_profit: 0, // Not used in our calculation
-          created_at: order.created_at,
-          product_name: order.products?.name || 'Unknown Product',
-          sizes: order.sizes || 'Unknown Size',
-          quantity: order.quantity || 0,
-          order_number: order.order_number || 0,
+          id: profit.id,
+          order_id: profit.order_id,
+          investor_id: profit.investor_id || 'shady',
+          gross_profit: profit.gross_profit || 0,
+          net_profit: profit.net_profit || 0,
+          cost_per_piece: costPerPiece, // Store cost per piece from profits table
+          price_per_piece: pricePerPiece, // Store price per piece from profits table
+          created_at: profit.created_at,
+          product_name: order?.products?.name || 'Unknown Product',
+          sizes: order?.sizes || 'Unknown Size',
+          quantity: order?.quantity || 0,
+          order_number: order?.order_number || 0,
           investor_name: 'Unknown Investor', // Not used in our calculation
-          orders: {
+          orders: order ? {
             product_id: order.product_id,
             sizes: order.sizes,
-            quantity: order.quantity,
-            order_number: order.order_number,
-            total_price: order.total_price,
-            status: order.status,
-            delivery_fees: order.delivery_fees,
-            payment_fees: order.payment_fees,
+            quantity: order.quantity || 0,
+            order_number: order.order_number || 0,
+            total_price: order.total_price || 0,
+            status: order.status || 'unknown',
+            delivery_fees: order.delivery_fees || 0,
+            payment_fees: order.payment_fees || 0,
+            created_at: order.created_at || profit.created_at, // Include order's created_at for date filtering
             products: {
-              name: order.products?.name,
-              cost_per_piece: costPerPiece // Use stored cost at order time
+              name: order.products?.name || 'Unknown Product',
+              cost_per_piece: costPerPiece, // Use stored cost from profits table
+              price_per_piece: pricePerPiece
             }
-          }
+          } : null
         }
       })
 
       setProfits(transformedProfits)
     } catch (error) {
-      console.error('Error fetching orders:', error)
+      console.error('Error fetching profits:', error)
     } finally {
       setLoading(false)
     }
@@ -148,34 +187,42 @@ export default function ProfitsPage() {
   const applyFilters = () => {
     let filtered = [...profits]
 
-    // Filter by date
+    // Filter by date - use order's created_at date, not profit's created_at
     if (filters.dateFilter !== 'all') {
       const now = new Date()
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
       
       filtered = filtered.filter(profit => {
-        const profitDate = new Date(profit.created_at)
+        // Use order's created_at if available, otherwise fall back to profit's created_at
+        const orderDate = profit.orders?.created_at 
+          ? new Date(profit.orders.created_at)
+          : new Date(profit.created_at)
         
         switch (filters.dateFilter) {
           case 'today':
-            return profitDate >= today
+            return orderDate >= today
           case 'week':
             const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
-            return profitDate >= weekAgo
+            return orderDate >= weekAgo
           case 'month':
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
             endOfMonth.setHours(23, 59, 59, 999)
-            return profitDate >= startOfMonth && profitDate <= endOfMonth
+            return orderDate >= startOfMonth && orderDate <= endOfMonth
+          case 'lastMonth':
+            const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+            const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
+            lastMonthEnd.setHours(23, 59, 59, 999)
+            return orderDate >= lastMonthStart && orderDate <= lastMonthEnd
           case 'year':
             const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
-            return profitDate >= yearAgo
+            return orderDate >= yearAgo
           case 'custom':
             if (filters.customDateFrom && filters.customDateTo) {
               const fromDate = new Date(filters.customDateFrom)
               const toDate = new Date(filters.customDateTo)
               toDate.setHours(23, 59, 59, 999) // Include the entire end date
-              return profitDate >= fromDate && profitDate <= toDate
+              return orderDate >= fromDate && orderDate <= toDate
             }
             return true
           default:
@@ -194,27 +241,115 @@ export default function ProfitsPage() {
     }))
   }
 
-  // Group orders by order_number to count unique orders
-  const uniqueOrders = filteredProfits.reduce((acc, profit) => {
-    const orderNumber = profit.orders?.order_number
-    if (orderNumber && !acc[orderNumber]) {
-      acc[orderNumber] = profit.orders
+  // Group profits by order_id to get unique orders (since each order can have multiple profit rows for different investors)
+  const uniqueOrdersByOrderId = filteredProfits.reduce((acc, profit) => {
+    const orderId = profit.order_id
+    if (orderId && !acc[orderId]) {
+      acc[orderId] = profit
     }
-      return acc
+    return acc
+  }, {} as Record<string, Profit>)
+
+  // Get unique orders array (one per order_id)
+  const uniqueOrdersArray = Object.values(uniqueOrdersByOrderId)
+
+  // Separate completed and canceled orders (using unique orders only)
+  const completedOrders = uniqueOrdersArray.filter(profit => {
+    const status = profit.orders?.status
+    // If status is explicitly canceled, exclude it
+    if (status === 'canceled') return false
+    // Include if status is completed, or if status is not available (assume completed)
+    return status === 'completed' || !status || status === 'pending'
+  })
+  const canceledOrders = uniqueOrdersArray.filter(profit => {
+    const status = profit.orders?.status
+    return status === 'canceled'
+  })
+
+  // Count unique order numbers for completed orders
+  const completedOrderNumbers = new Set(
+    completedOrders.map(p => p.order_number || p.orders?.order_number).filter(Boolean)
+  )
+  
+  // Count unique order numbers for canceled orders
+  const canceledOrderNumbers = new Set(
+    canceledOrders.map(p => p.order_number || p.orders?.order_number).filter(Boolean)
+  )
+  
+  // Total unique order numbers (completed + canceled, but don't double count)
+  const totalOrderNumbers = new Set([...Array.from(completedOrderNumbers), ...Array.from(canceledOrderNumbers)])
+  
+  // Group orders by order_number for display
+  const uniqueOrdersByOrderNumber = uniqueOrdersArray.reduce((acc, profit) => {
+    const orderNumber = profit.order_number || profit.orders?.order_number
+    if (orderNumber && !acc[orderNumber]) {
+      acc[orderNumber] = profit.orders || profit
+    }
+    return acc
   }, {} as Record<number, any>)
 
-  // Separate completed and canceled orders
-  const completedOrders = filteredProfits.filter(profit => profit.orders?.status === 'completed')
-  const canceledOrders = filteredProfits.filter(profit => profit.orders?.status === 'canceled')
+  // Identify exchanged orders: orders with same order_number but multiple different products
+  // IMPORTANT: Only show exchanges from December 2025 onwards (when exchange feature was implemented)
+  const exchangeFeatureStartDate = new Date('2025-12-01')
+  
+  const orderNumberGroups = filteredProfits.reduce((acc, profit) => {
+    const orderNumber = profit.order_number || profit.orders?.order_number
+    if (!orderNumber) return acc
+    
+    // Get order date to filter exchanges
+    const orderDate = profit.orders?.created_at 
+      ? new Date(profit.orders.created_at)
+      : new Date(profit.created_at)
+    
+    // Only include orders from when exchange feature was implemented (December 2025+)
+    if (orderDate < exchangeFeatureStartDate) return acc
+    
+    if (!acc[orderNumber]) {
+      acc[orderNumber] = []
+    }
+    acc[orderNumber].push(profit)
+    return acc
+  }, {} as Record<number, Profit[]>)
 
-  // Calculate total revenue from completed orders only
+  // Find exchanged orders (order_numbers with multiple different products)
+  // Only include exchanges from December 2025 onwards
+  const exchangedOrdersMap = Object.entries(orderNumberGroups).reduce((acc, [orderNumber, profits]) => {
+    if (profits.length > 1) {
+      // Check if products are different
+      const productIds = new Set(profits.map(p => p.orders?.product_id || '').filter(Boolean))
+      if (productIds.size > 1) {
+        // This is an exchanged order - has multiple different products
+        // (We already filtered by date in orderNumberGroups, so all orders here are from December 2025+)
+        acc[parseInt(orderNumber)] = profits.sort((a, b) => {
+          // Sort by order_id to get original first, then exchanged
+          const idA = parseInt(a.order_id) || 0
+          const idB = parseInt(b.order_id) || 0
+          return idA - idB
+        })
+      }
+    }
+    return acc
+  }, {} as Record<number, Profit[]>)
+
+
+  // Calculate total revenue from completed orders only (using unique orders)
+  // Use gross_profit + (cost * quantity) to get total_price if orders.total_price is missing
   const totalRevenue = completedOrders.reduce((sum, profit) => {
-    return sum + (profit.orders?.total_price || 0)
+    if (profit.orders?.total_price) {
+      return sum + profit.orders.total_price
+    }
+    // Fallback: calculate from gross_profit and cost
+    const costPerPiece = profit.cost_per_piece || 0
+    const quantity = profit.orders?.quantity || profit.quantity || 0
+    const grossProfit = profit.gross_profit || 0
+    // total_price = gross_profit + (cost_per_piece * quantity)
+    const calculatedTotal = grossProfit + (costPerPiece * quantity)
+    return sum + calculatedTotal
   }, 0)
   
-  // Calculate total pieces sold from completed orders only
+  // Calculate total pieces sold from completed orders only (using unique orders)
   const totalPiecesSold = completedOrders.reduce((sum, profit) => {
-    return sum + (profit.orders?.quantity || 0)
+    return sum + (profit.orders?.quantity || profit.quantity || 0)
   }, 0)
   
   // Calculate total deductions from completed orders (delivery fees + payment fees)
@@ -225,16 +360,53 @@ export default function ProfitsPage() {
   }, 0)
   
   // Calculate total product costs from completed orders only (cost per piece × quantity sold)
-  const totalProductCosts = completedOrders.reduce((sum, profit) => {
-    const costPerPiece = profit.orders?.products?.cost_per_piece || 0
-    return sum + (costPerPiece * (profit.orders?.quantity || 0))
+  // IMPORTANT: Use cost_per_piece from orders table (stored at order time) × quantity for each order item
+  // Since profits table has one row per investor per order, we need to get unique orders first
+  // Group by order_id to avoid double counting
+  const uniqueCompletedOrderIds = new Set(completedOrders.map(p => p.order_id))
+  const totalProductCosts = Array.from(uniqueCompletedOrderIds).reduce((sum, orderId) => {
+    // Find the first profit record for this order_id (they all have the same order data)
+    const profit = completedOrders.find(p => p.order_id === orderId)
+    if (!profit) return sum
+    
+    // Get cost_per_piece from order (most accurate, stored at order time)
+    const costPerPiece = profit.orders?.cost_per_piece ?? profit.cost_per_piece ?? 0
+    const quantity = profit.orders?.quantity || profit.quantity || 0
+    // Calculate cost for this specific order item: cost_per_piece × quantity
+    const itemCost = costPerPiece * quantity
+    return sum + itemCost
+  }, 0)
+  
+  // Calculate net profit from unique orders (avoid double counting from multiple investors)
+  // Net profit = total_price - (cost_per_piece × quantity) - payment_fees - delivery_fees
+  const totalNetProfitFromOrders = Array.from(uniqueCompletedOrderIds).reduce((sum, orderId) => {
+    const profit = completedOrders.find(p => p.order_id === orderId)
+    if (!profit || !profit.orders) return sum
+    
+    const totalPrice = profit.orders.total_price || 0
+    const costPerPiece = profit.orders.cost_per_piece ?? profit.cost_per_piece ?? 0
+    const quantity = profit.orders.quantity || profit.quantity || 0
+    const paymentFees = profit.orders.payment_fees || 0
+    const deliveryFees = profit.orders.delivery_fees || 0
+    
+    // Calculate net profit for this order: total_price - (cost × qty) - fees
+    const orderNetProfit = totalPrice - (costPerPiece * quantity) - paymentFees - deliveryFees
+    return sum + orderNetProfit
   }, 0)
 
   
 
   // Calculate canceled order deductions (to show what was lost due to cancellations)
+  // Using unique orders to avoid double counting
   const canceledRevenue = canceledOrders.reduce((sum, profit) => {
-    return sum + (profit.orders?.total_price || 0)
+    if (profit.orders?.total_price) {
+      return sum + profit.orders.total_price
+    }
+    // Fallback: calculate from gross_profit and cost
+    const costPerPiece = profit.cost_per_piece || 0
+    const quantity = profit.orders?.quantity || profit.quantity || 0
+    const grossProfit = profit.gross_profit || 0
+    return sum + (grossProfit + (costPerPiece * quantity))
   }, 0)
   
   const canceledDeductions = canceledOrders.reduce((sum, profit) => {
@@ -244,8 +416,10 @@ export default function ProfitsPage() {
   }, 0)
   
   const canceledProductCosts = canceledOrders.reduce((sum, profit) => {
-    const costPerPiece = profit.orders?.products?.cost_per_piece || 0
-    return sum + (costPerPiece * (profit.orders?.quantity || 0))
+    // Try to get cost from profits table first, then fall back to order/product
+    const costPerPiece = profit.cost_per_piece ?? profit.orders?.products?.cost_per_piece ?? 0
+    const quantity = profit.orders?.quantity || profit.quantity || 0
+    return sum + (costPerPiece * quantity)
   }, 0)
   
   // Calculate total business costs for the active date filter (default current month)
@@ -268,6 +442,12 @@ export default function ProfitsPage() {
       case 'month': {
         const start = new Date(now.getFullYear(), now.getMonth(), 1)
         const end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+        end.setHours(23, 59, 59, 999)
+        return { start, end }
+      }
+      case 'lastMonth': {
+        const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        const end = new Date(now.getFullYear(), now.getMonth(), 0)
         end.setHours(23, 59, 59, 999)
         return { start, end }
       }
@@ -303,8 +483,9 @@ export default function ProfitsPage() {
   // Calculate total orders amount excluding delivery fees, payment fees, and expenses
   const totalOrdersExcludingFeesAndExpenses = totalRevenue - totalOrderDeductions - totalExpenses
   
-  // Calculate net profit: Total Orders Amount - Delivery Fees - Payment Fees - Product Costs - Expenses
-  const netProfit = totalRevenue - totalOrderDeductions - totalProductCosts - totalExpenses
+  // Net profit = sum of net profit from unique orders - expenses
+  // This ensures we don't double count when multiple investors have profit records for the same order
+  const netProfit = totalNetProfitFromOrders - totalExpenses
   
   // Calculate investor shares based on their percentage of net profit
   const shadyShare = netProfit * 0.8 // 80%
@@ -352,7 +533,7 @@ export default function ProfitsPage() {
       profit.sizes,
       profit.quantity,
       profit.orders?.total_price || 0,
-      profit.orders?.products?.cost_per_piece || 0,
+      profit.cost_per_piece || profit.orders?.products?.cost_per_piece || 0,
       profit.orders?.payment_fees || 0,
       profit.orders?.delivery_fees || 0,
       profit.orders?.status || '',
@@ -418,29 +599,38 @@ export default function ProfitsPage() {
       {/* Orders Summary */}
       <div className="bg-card border border-border rounded-lg p-6">
         <h3 className="text-xl font-semibold text-foreground mb-6">Orders Summary</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="text-center">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+          <div className="text-center p-4 bg-muted/30 rounded-lg">
             <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Orders</h4>
-            <p className="text-3xl font-bold text-foreground">{Object.keys(uniqueOrders).length}</p>
-        </div>
+            <p className="text-3xl font-bold text-foreground">{totalOrderNumbers.size}</p>
+            <p className="text-xs text-muted-foreground mt-1">Completed + Canceled</p>
+          </div>
           
-          <div className="text-center">
+          <div className="text-center p-4 bg-muted/30 rounded-lg">
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Orders (Completed)</h4>
+            <p className="text-3xl font-bold text-foreground">{completedOrderNumbers.size}</p>
+            <p className="text-xs text-muted-foreground mt-1">Completed only</p>
+          </div>
+          
+          <div className="text-center p-4 bg-muted/30 rounded-lg">
             <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Pieces Sold</h4>
             <p className="text-3xl font-bold text-foreground">{totalPiecesSold}</p>
-      </div>
+            <p className="text-xs text-muted-foreground mt-1">Completed orders only</p>
+          </div>
 
-          <div className="text-center">
-            <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Orders Amount (Completed)</h4>
+          <div className="text-center p-4 bg-muted/30 rounded-lg">
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Orders Amount</h4>
             <p className="text-3xl font-bold text-foreground">{formatCurrency(totalRevenue)}</p>
-            </div>
+            <p className="text-xs text-muted-foreground mt-1">Completed orders only</p>
+          </div>
           
-          <div className="text-center">
-            <h4 className="text-sm font-medium text-muted-foreground mb-2">Orders Amount excl. Fees & Expenses</h4>
+          <div className="text-center p-4 bg-muted/30 rounded-lg">
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">Orders Amount excl. Fees</h4>
             <p className="text-3xl font-bold text-foreground">{formatCurrency(totalOrdersExcludingFeesAndExpenses)}</p>
             <p className="text-xs text-muted-foreground mt-1">Completed orders only</p>
           </div>
           
-          <div className="text-center">
+          <div className="text-center p-4 bg-muted/30 rounded-lg">
             <h4 className="text-sm font-medium text-muted-foreground mb-2">Total Profit Amount</h4>
             <p className={`text-3xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
               {formatCurrency(netProfit)}
@@ -448,9 +638,9 @@ export default function ProfitsPage() {
             <p className="text-xs text-muted-foreground mt-1">
               After deducting fees, expenses & costs
             </p>
-            </div>
           </div>
         </div>
+      </div>
         
         {/* Detailed Profit Breakdown */}
         <div className="mt-6 p-4 bg-muted/30 rounded-lg">
@@ -494,14 +684,20 @@ export default function ProfitsPage() {
         </div>
 
         {/* Canceled Orders Information */}
-        {canceledOrders.length > 0 && (
+        {canceledOrderNumbers.size > 0 && (
           <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
             <h4 className="text-sm font-medium text-red-800 dark:text-red-200 mb-3">Canceled Orders Impact</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-4">
               <div className="space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-red-700 dark:text-red-300">Canceled Orders Count:</span>
-                  <span className="font-medium text-red-800 dark:text-red-200">{canceledOrders.length}</span>
+                  <span className="text-red-700 dark:text-red-300">Total Orders Canceled:</span>
+                  <span className="font-medium text-red-800 dark:text-red-200">{canceledOrderNumbers.size}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-red-700 dark:text-red-300">Total Pieces Canceled:</span>
+                  <span className="font-medium text-red-800 dark:text-red-200">
+                    {canceledOrders.reduce((sum, profit) => sum + (profit.orders?.quantity || profit.quantity || 0), 0)}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-red-700 dark:text-red-300">Lost Revenue:</span>
@@ -584,6 +780,272 @@ export default function ProfitsPage() {
         </div>
       </div>
 
+      {/* Exchanged Orders Summary */}
+      {Object.keys(exchangedOrdersMap).length > 0 && (() => {
+        const exchangedOrdersList = Object.entries(exchangedOrdersMap)
+          .filter(([orderNumber, profits]) => {
+            return profits.some(p => {
+              const status = p.orders?.status
+              return status === 'completed' || (!status && p.orders)
+            })
+          })
+          .map(([orderNumber, profits]) => {
+            const originalOrder = profits[0]
+            const exchangedOrder = profits[profits.length - 1]
+            const exchangedStatus = exchangedOrder.orders?.status
+            if (exchangedStatus === 'canceled') return null
+            
+            return {
+              orderNumber: parseInt(orderNumber),
+              originalProduct: originalOrder.product_name || 'Unknown',
+              originalSize: originalOrder.orders?.sizes || originalOrder.sizes || 'N/A',
+              exchangedProduct: exchangedOrder.product_name || 'Unknown',
+              exchangedSize: exchangedOrder.orders?.sizes || exchangedOrder.sizes || 'N/A',
+              originalQty: originalOrder.orders?.quantity || originalOrder.quantity || 0,
+              exchangedQty: exchangedOrder.orders?.quantity || exchangedOrder.quantity || 0,
+              originalPrice: originalOrder.orders?.total_price || 0,
+              exchangedPrice: exchangedOrder.orders?.total_price || 0,
+              priceDifference: (exchangedOrder.orders?.total_price || 0) - (originalOrder.orders?.total_price || 0)
+            }
+          })
+          .filter((order): order is NonNullable<typeof order> => order !== null && order !== undefined)
+        
+        return (
+          <div className="bg-card border border-border rounded-lg p-6">
+            <h3 className="text-xl font-semibold text-foreground mb-6">Exchanged Orders Summary</h3>
+            <p className="text-sm text-muted-foreground mb-4">Details of orders that were exchanged (Completed orders only, from December 2025 onwards when exchange feature was implemented)</p>
+            
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left p-2 font-semibold text-foreground">Order #</th>
+                    <th className="text-left p-2 font-semibold text-foreground">Original</th>
+                    <th className="text-left p-2 font-semibold text-foreground">Size</th>
+                    <th className="text-left p-2 font-semibold text-foreground">Exchanged</th>
+                    <th className="text-left p-2 font-semibold text-foreground">Size</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Qty</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Qty</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Price</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Price</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Diff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {exchangedOrdersList.map((order) => (
+                    <tr key={order.orderNumber || 'unknown'} className="border-b border-border/50 hover:bg-muted/30">
+                      <td className="p-2 text-foreground font-medium">#{order.orderNumber || 'N/A'}</td>
+                      <td className="p-2 text-foreground">{order.originalProduct}</td>
+                      <td className="p-2 text-foreground">{order.originalSize}</td>
+                      <td className="p-2 text-foreground font-medium">{order.exchangedProduct}</td>
+                      <td className="p-2 text-foreground">{order.exchangedSize}</td>
+                      <td className="p-2 text-right text-foreground">{order.originalQty}</td>
+                      <td className="p-2 text-right text-foreground">{order.exchangedQty}</td>
+                      <td className="p-2 text-right text-foreground">{formatCurrency(order.originalPrice)}</td>
+                      <td className="p-2 text-right text-foreground">{formatCurrency(order.exchangedPrice)}</td>
+                      <td className={`p-2 text-right font-medium ${order.priceDifference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {order.priceDifference >= 0 ? '+' : ''}{formatCurrency(order.priceDifference)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            {/* Mobile Card View */}
+            <div className="md:hidden space-y-4">
+              {exchangedOrdersList.map((order, index) => (
+                <div key={order.orderNumber || `order-${index}`} className={`p-4 ${index < exchangedOrdersList.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800 mb-4' : ''}`}>
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="font-semibold text-foreground">Order #{order.orderNumber || 'N/A'}</h3>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${order.priceDifference >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {order.priceDifference >= 0 ? '+' : ''}{formatCurrency(order.priceDifference)}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-3 text-sm">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-muted-foreground">Original Product:</span>
+                        <p className="font-medium text-foreground">{order.originalProduct}</p>
+                        <p className="text-xs text-muted-foreground">Size: {order.originalSize}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Exchanged Product:</span>
+                        <p className="font-medium text-foreground">{order.exchangedProduct}</p>
+                        <p className="text-xs text-muted-foreground">Size: {order.exchangedSize}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-muted-foreground">Original Qty:</span>
+                        <span className="ml-1 font-medium">{order.originalQty}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Exchanged Qty:</span>
+                        <span className="ml-1 font-medium">{order.exchangedQty}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-muted-foreground">Original Price:</span>
+                        <span className="ml-1 font-medium">{formatCurrency(order.originalPrice)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Exchanged Price:</span>
+                        <span className="ml-1 font-medium">{formatCurrency(order.exchangedPrice)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="mt-4 p-3 bg-muted/30 rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                <strong>Total Exchanged Orders:</strong> {exchangedOrdersList.length}
+              </p>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Product Sales Breakdown - Completed Orders Only */}
+      <div className="bg-card border border-border rounded-lg p-6">
+        <h3 className="text-xl font-semibold text-foreground mb-6">Product Sales Breakdown</h3>
+        <p className="text-sm text-muted-foreground mb-4">Quantity sold per product (Completed orders only, exchanges included)</p>
+        {(() => {
+          // Handle exchanges: Group by order_number and take the most recent order (highest order_id)
+          // This ensures if an order was exchanged, we count the exchanged product, not the original
+          const ordersByOrderNumber = completedOrders.reduce((acc, profit) => {
+            const orderNumber = profit.order_number || profit.orders?.order_number
+            if (!orderNumber) return acc
+            
+            const orderId = parseInt(profit.order_id) || 0
+            const existing = acc[orderNumber]
+            
+            // If no existing order for this order_number, or this order_id is higher (more recent), use this one
+            if (!existing || orderId > (parseInt(existing.order_id) || 0)) {
+              acc[orderNumber] = profit
+            }
+            
+            return acc
+          }, {} as Record<number, Profit>)
+          
+          // Get the final orders (after handling exchanges)
+          const finalOrders = Object.values(ordersByOrderNumber)
+          
+          // Create a set of order numbers that were exchanged
+          const exchangedOrderNumbers = new Set(Object.keys(exchangedOrdersMap).map(n => parseInt(n)))
+          
+          // Group by product name and sum quantities
+          const productSales = finalOrders.reduce((acc, profit) => {
+            const productName = profit.product_name || 'Unknown Product'
+            const orderNumber = profit.order_number || profit.orders?.order_number
+            const isExchanged = orderNumber ? exchangedOrderNumbers.has(orderNumber) : false
+            const quantity = profit.orders?.quantity || profit.quantity || 0
+            
+            const key = `${productName}${isExchanged ? ' (exchanged)' : ''}`
+            
+            if (!acc[key]) {
+              acc[key] = {
+                name: productName,
+                totalQuantity: 0,
+                totalRevenue: 0,
+                isExchanged: isExchanged
+              }
+            }
+            
+            acc[key].totalQuantity += quantity
+            acc[key].totalRevenue += profit.orders?.total_price || 0
+            
+            return acc
+          }, {} as Record<string, { name: string; totalQuantity: number; totalRevenue: number; isExchanged: boolean }>)
+          
+          const productSalesArray = Object.values(productSales).sort((a, b) => b.totalQuantity - a.totalQuantity)
+          
+          if (productSalesArray.length === 0) {
+            return (
+              <p className="text-muted-foreground text-center py-4">No completed orders found for the selected period.</p>
+            )
+          }
+          
+          return (
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left p-2 font-semibold text-foreground">Product Name</th>
+                      <th className="text-right p-2 font-semibold text-foreground">Quantity Sold</th>
+                      <th className="text-right p-2 font-semibold text-foreground">Total Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productSalesArray.map((product, index) => (
+                      <tr key={index} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="p-2 text-foreground">
+                          {product.name}
+                          {product.isExchanged && (
+                            <span className="ml-2 px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                              Exchanged
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2 text-right font-medium text-foreground">{product.totalQuantity}</td>
+                        <td className="p-2 text-right font-medium text-foreground">{formatCurrency(product.totalRevenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border font-bold">
+                      <td className="p-2 text-foreground">Total</td>
+                      <td className="p-2 text-right text-foreground">{totalPiecesSold}</td>
+                      <td className="p-2 text-right text-foreground">{formatCurrency(totalRevenue)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              
+              {/* Mobile Card View */}
+              <div className="md:hidden space-y-4">
+                {productSalesArray.map((product, index) => (
+                  <div key={index} className={`p-4 ${index < productSalesArray.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800 mb-4' : ''}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-semibold text-foreground">{product.name}</h3>
+                        {product.isExchanged && (
+                          <span className="mt-1 inline-block px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                            Exchanged
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-lg font-bold text-green-600">{formatCurrency(product.totalRevenue)}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Quantity Sold: </span>
+                      <span className="font-medium text-foreground">{product.totalQuantity}</span>
+                    </div>
+                  </div>
+                ))}
+                <div className="p-4 bg-muted/30 rounded-lg border-t-2 border-border">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-foreground">Total</span>
+                    <div className="text-right">
+                      <p className="font-bold text-foreground">{totalPiecesSold} pieces</p>
+                      <p className="font-bold text-green-600">{formatCurrency(totalRevenue)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )
+        })()}
+      </div>
 
     </div>
   )

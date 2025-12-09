@@ -14,3 +14,5 @@ ADD COLUMN IF NOT EXISTS price_per_piece DECIMAL(10,2);
 COMMENT ON COLUMN orders.cost_per_piece IS 'Cost per piece at the time of order creation. Stored to preserve historical cost data.';
 COMMENT ON COLUMN orders.price_per_piece IS 'Price per piece at the time of order creation. Stored to preserve historical price data.';
 
+
+

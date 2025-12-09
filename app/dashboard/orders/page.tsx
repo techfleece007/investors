@@ -20,6 +20,9 @@ interface Order {
   delivery_fees: number
   status: string
   created_at: string
+  cost_per_piece?: number
+  price_per_piece?: number
+  product_id?: string
 }
 
 interface Product {
@@ -45,6 +48,7 @@ interface OrderItem {
   product_name: string
   size: string
   quantity: number
+  cost_per_piece: number
   price_per_piece: number
   total_price: number
 }
@@ -84,6 +88,8 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showExchangeModal, setShowExchangeModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [exchangeData, setExchangeData] = useState<ExchangeData>({
@@ -102,7 +108,7 @@ export default function OrdersPage() {
   const [filters, setFilters] = useState({
     status: 'all' as 'all' | 'pending' | 'completed' | 'canceled',
     paymentMethod: 'all' as 'all' | 'cash' | 'card' | 'tabby',
-    dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'year' | 'custom',
+    dateFilter: 'month' as 'all' | 'today' | 'week' | 'month' | 'lastMonth' | 'year' | 'custom',
     customDateFrom: '',
     customDateTo: ''
   })
@@ -126,7 +132,7 @@ export default function OrdersPage() {
 
   const fetchData = async () => {
     try {
-      // Fetch orders with product details
+      // Fetch orders with product details including cost_per_piece and price_per_piece
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select(`
@@ -159,7 +165,9 @@ export default function OrdersPage() {
           quantity: order.quantity,
           total_price: order.total_price,
           payment_fees: order.payment_fees,
-          delivery_fees: order.delivery_fees
+          delivery_fees: order.delivery_fees,
+          cost_per_piece: order.cost_per_piece,
+          price_per_piece: order.price_per_piece
         })
         return groups
       }, {})
@@ -187,7 +195,9 @@ export default function OrdersPage() {
           payment_fees: group.products.reduce((sum: number, product: any) => sum + (product.payment_fees || 0), 0),
           delivery_fees: group.products.reduce((sum: number, product: any) => sum + (product.delivery_fees || 0), 0),
           status: group.status,
-          created_at: group.created_at
+          created_at: group.created_at,
+          cost_per_piece: productCount === 1 ? group.products[0].cost_per_piece : undefined, // Show cost only for single product orders
+          price_per_piece: productCount === 1 ? group.products[0].price_per_piece : undefined // Show price only for single product orders
         }
       })
 
@@ -249,6 +259,11 @@ export default function OrdersPage() {
             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
             endOfMonth.setHours(23, 59, 59, 999)
             return orderDate >= startOfMonth && orderDate <= endOfMonth
+          case 'lastMonth':
+            const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+            const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
+            lastMonthEnd.setHours(23, 59, 59, 999)
+            return orderDate >= lastMonthStart && orderDate <= lastMonthEnd
           case 'year':
             const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
             return orderDate >= yearAgo
@@ -282,6 +297,7 @@ export default function OrdersPage() {
       product_name: '',
       size: '',
       quantity: 1,
+      cost_per_piece: 0,
       price_per_piece: 0,
       total_price: 0
     }])
@@ -330,8 +346,9 @@ export default function OrdersPage() {
           ...updated[index],
           product_id: productId,
           product_name: product.name,
-          price_per_piece: product.price_per_piece,
-          total_price: product.price_per_piece * updated[index].quantity,
+          cost_per_piece: product.cost_per_piece || 0,
+          price_per_piece: product.price_per_piece || 0,
+          total_price: (product.price_per_piece || 0) * updated[index].quantity,
           size: '' // Reset size when product changes
         }
         
@@ -347,26 +364,24 @@ export default function OrdersPage() {
     const item = orderItems[index]
     
     if (item && item.product_id) {
+      // Find variant to get variant-specific cost and price
       const variant = productVariants.find(v => 
         v.product_id.toString() === item.product_id && v.size === size
       )
       
-      if (variant) {
-        setOrderItems(prev => {
-          const updated = [...prev]
-          updated[index] = {
-            ...updated[index],
-            size: size,
-            price_per_piece: variant.price,
-            total_price: variant.price * updated[index].quantity
-          }
-          
-          // Recalculate payment fees when total order amount changes
-          recalculatePaymentFees(updated)
-          
-          return updated
-        })
-      }
+      // Update cost and price from variant if available, otherwise keep product values
+      setOrderItems(prev => {
+        const updated = [...prev]
+        updated[index] = {
+          ...updated[index],
+          size: size,
+          cost_per_piece: variant?.cost || updated[index].cost_per_piece || 0,
+          price_per_piece: variant?.price || updated[index].price_per_piece || 0,
+          total_price: (variant?.price || updated[index].price_per_piece || 0) * updated[index].quantity
+        }
+        recalculatePaymentFees(updated)
+        return updated
+      })
     }
   }
 
@@ -418,8 +433,8 @@ export default function OrdersPage() {
           v.product_id.toString() === item.product_id && v.size === item.size
         )
         
-        // Use variant cost if available, otherwise product cost
-        const costPerPiece = variant?.cost || product?.cost_per_piece || 0
+        // Use the cost and price entered in the form (user can override product/variant defaults)
+        const costPerPiece = item.cost_per_piece || variant?.cost || product?.cost_per_piece || 0
         const pricePerPiece = item.price_per_piece || variant?.price || product?.price_per_piece || 0
         
         const { error: orderError } = await supabase
@@ -552,6 +567,192 @@ export default function OrdersPage() {
   }
 
   const handleEditOrder = async (order: Order) => {
+    try {
+      // Get the full order data including cost_per_piece and price_per_piece
+      const { data: orderData, error: fetchError } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          products (
+            name,
+            cost_per_piece,
+            price_per_piece
+          )
+        `)
+        .eq('id', order.id)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      if (!orderData) {
+        alert('Order not found')
+        return
+      }
+
+      // Set editing order and show modal
+      setEditingOrder({
+        ...order,
+        cost_per_piece: orderData.cost_per_piece,
+        price_per_piece: orderData.price_per_piece
+      } as any)
+      setShowEditModal(true)
+    } catch (error) {
+      console.error('Error fetching order:', error)
+      alert('Error loading order. Please try again.')
+    }
+  }
+
+  const handleUpdateOrder = async (updatedOrder: any) => {
+    try {
+      const oldOrder = editingOrder
+      if (!oldOrder) return
+
+      // Update the order with new values
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          total_price: updatedOrder.total_price,
+          quantity: updatedOrder.quantity,
+          cost_per_piece: updatedOrder.cost_per_piece,
+          price_per_piece: updatedOrder.price_per_piece,
+          payment_fees: updatedOrder.payment_fees,
+          delivery_fees: updatedOrder.delivery_fees,
+          status: updatedOrder.status,
+          payment_method: updatedOrder.payment_method
+        })
+        .eq('id', oldOrder.id)
+
+      if (updateError) throw updateError
+
+      // Handle status changes for inventory
+      if (updatedOrder.status !== oldOrder.status) {
+        const oldStatus = oldOrder.status
+        const newStatus = updatedOrder.status
+
+        // Handle quantity restoration for canceled orders
+        if (newStatus === 'canceled' && oldStatus !== 'canceled') {
+          const variant = productVariants.find(v => 
+            v.product_id.toString() === oldOrder.product_id?.toString() && v.size === oldOrder.sizes
+          )
+          
+          if (variant) {
+            await supabase
+              .from('product_variants')
+              .update({ quantity: variant.quantity + oldOrder.quantity })
+              .eq('id', variant.id)
+          }
+          
+          const product = products.find(p => p.id.toString() === oldOrder.product_id?.toString())
+          if (product) {
+            await supabase
+              .from('products')
+              .update({ quantity: product.quantity + oldOrder.quantity })
+              .eq('id', product.id)
+          }
+        }
+
+        // Handle quantity deduction for completed orders (from canceled)
+        if (newStatus === 'completed' && oldStatus === 'canceled') {
+          const variant = productVariants.find(v => 
+            v.product_id.toString() === oldOrder.product_id?.toString() && v.size === oldOrder.sizes
+          )
+          
+          if (variant) {
+            await supabase
+              .from('product_variants')
+              .update({ quantity: Math.max(0, variant.quantity - updatedOrder.quantity) })
+              .eq('id', variant.id)
+          }
+          
+          const product = products.find(p => p.id.toString() === oldOrder.product_id?.toString())
+          if (product) {
+            await supabase
+              .from('products')
+              .update({ quantity: Math.max(0, product.quantity - updatedOrder.quantity) })
+              .eq('id', product.id)
+          }
+        }
+      }
+
+      // Handle quantity changes
+      if (updatedOrder.quantity !== oldOrder.quantity && updatedOrder.status === 'completed') {
+        const quantityDiff = updatedOrder.quantity - oldOrder.quantity
+        const variant = productVariants.find(v => 
+          v.product_id.toString() === oldOrder.product_id?.toString() && v.size === oldOrder.sizes
+        )
+        
+        if (variant) {
+          await supabase
+            .from('product_variants')
+            .update({ quantity: Math.max(0, variant.quantity - quantityDiff) })
+            .eq('id', variant.id)
+        }
+        
+        const product = products.find(p => p.id.toString() === oldOrder.product_id?.toString())
+        if (product) {
+          await supabase
+            .from('products')
+            .update({ quantity: Math.max(0, product.quantity - quantityDiff) })
+            .eq('id', product.id)
+        }
+      }
+
+      // Profits will be recalculated automatically by the trigger when order is updated
+      // The trigger uses cost_per_piece and price_per_piece from the order
+
+      // Send email notification ONLY when status changes to canceled
+      // (New orders and exchanges already send emails in their respective handlers)
+      if (updatedOrder.status !== oldOrder.status && updatedOrder.status === 'canceled') {
+        try {
+          // Fetch updated order data for email
+          const { data: updatedOrderData } = await supabase
+            .from('orders')
+            .select(`
+              *,
+              products (
+                name
+              )
+            `)
+            .eq('id', oldOrder.id)
+            .single()
+
+          if (updatedOrderData) {
+            const orderItemsForEmail = [{
+              product_name: (updatedOrderData.products as any)?.name || oldOrder.product_name,
+              size: updatedOrderData.sizes || oldOrder.sizes,
+              quantity: updatedOrderData.quantity,
+              unit_price: updatedOrderData.total_price / updatedOrderData.quantity,
+              total_price: updatedOrderData.total_price
+            }]
+
+            await sendOrderEmail({
+              order_number: updatedOrderData.order_number,
+              shipping_number: updatedOrderData.shipping_number,
+              status: updatedOrder.status,
+              items: orderItemsForEmail,
+              payment_method: updatedOrderData.payment_method,
+              payment_fees: updatedOrderData.payment_fees,
+              delivery_fees: updatedOrderData.delivery_fees,
+              created_at: updatedOrderData.created_at
+            })
+          }
+        } catch (emailError) {
+          console.error('Error sending email notification:', emailError)
+          // Don't fail the order update if email fails
+        }
+      }
+
+      alert('Order updated successfully! Profits will be recalculated automatically.')
+      setShowEditModal(false)
+      setEditingOrder(null)
+      fetchData()
+    } catch (error) {
+      console.error('Error updating order:', error)
+      alert('Error updating order. Please try again.')
+    }
+  }
+
+  const handleEditOrderOld = async (order: Order) => {
     try {
       // Get all orders with the same order number
       const { data: orderData, error: fetchError } = await supabase
@@ -943,6 +1144,12 @@ export default function OrdersPage() {
       // - If new price > old price: still keep original method (difference paid by cash, but we don't add fees)
       const paymentMethod = oldOrderDetails[0].payment_method
       
+      // Get cost and price for the new product
+      const newProduct = products.find(p => p.id.toString() === exchangeData.newProduct.product_id)
+      // newVariant is already declared above, reuse it
+      const costPerPiece = newVariant?.cost || newProduct?.cost_per_piece || 0
+      const pricePerPiece = exchangeData.newProduct.price_per_piece || newVariant?.price || newProduct?.price_per_piece || 0
+      
       const { error: insertError } = await supabase
         .from('orders')
         .insert({
@@ -956,7 +1163,9 @@ export default function OrdersPage() {
           payment_method: paymentMethod,
           payment_fees: originalPaymentFees, // Keep original fees, no fees on cash difference
           delivery_fees: oldOrderDetails[0].delivery_fees,
-          status: oldOrderDetails[0].status
+          status: oldOrderDetails[0].status,
+          cost_per_piece: costPerPiece, // Store cost at order time
+          price_per_piece: pricePerPiece // Store price at order time
         })
 
       if (insertError) throw insertError
@@ -1054,6 +1263,7 @@ export default function OrdersPage() {
                 product_name: '',
                 size: '',
                 quantity: 1,
+                cost_per_piece: 0,
                 price_per_piece: 0,
                 total_price: 0
               }])
@@ -1127,8 +1337,8 @@ export default function OrdersPage() {
           filteredCount={filteredOrders.length}
         />
 
-        {/* Mobile Card View */}
-        <div className="block lg:hidden">
+        {/* Card View - Mobile and Desktop */}
+        <div>
           {filteredOrders.map((order, index) => (
             <div key={order.id} className={`p-4 ${index < filteredOrders.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800 mb-4' : ''}`}>
               <div className="flex justify-between items-start mb-3">
@@ -1184,6 +1394,21 @@ export default function OrdersPage() {
                   </div>
                 </div>
                 
+                {order.cost_per_piece !== undefined && order.cost_per_piece !== null && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-muted-foreground">Cost per Piece:</span>
+                      <span className="ml-1 font-medium">AED {order.cost_per_piece.toFixed(2)}</span>
+                    </div>
+                    {order.price_per_piece !== undefined && order.price_per_piece !== null && (
+                      <div>
+                        <span className="text-muted-foreground">Price per Piece:</span>
+                        <span className="ml-1 font-medium">AED {order.price_per_piece.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 <div className="flex items-center justify-between text-muted-foreground">
                   <div className="flex items-center">
                     <Calendar className="h-4 w-4 mr-2" />
@@ -1218,142 +1443,6 @@ export default function OrdersPage() {
           ))}
         </div>
 
-        {/* Desktop Table View */}
-        <div className="hidden lg:block overflow-x-auto">
-          <table className="min-w-full divide-y divide-border">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Order #
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Shipping #
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Product
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Size
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Qty
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Total
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Net
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Payment
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Fees
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-card divide-y divide-border">
-              {filteredOrders.map((order, index) => (
-                <tr key={order.id} className={`hover:bg-muted/30 ${index < filteredOrders.length - 1 ? 'border-b-2 border-blue-200 dark:border-blue-800' : ''}`}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
-                    #{order.order_number}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    #{order.shipping_number}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <ShoppingCart className="h-4 w-4 text-muted-foreground mr-2" />
-                      <span className="text-sm font-medium text-foreground">
-                        {order.product_name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    {order.sizes}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    {order.quantity}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    <div className="flex items-center">
-                      <DollarSign className="h-4 w-4 text-muted-foreground mr-1" />
-                      <span>AED {order.total_price.toFixed(2)}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    <div className="flex items-center">
-                      <DollarSign className="h-4 w-4 text-muted-foreground mr-1" />
-                      <span>
-                        AED {(
-                          (order.total_price || 0) - (order.delivery_fees || 0) - (order.payment_fees || 0)
-                        ).toFixed(2)}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    <span className="capitalize">{order.payment_method}</span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    <div className="space-y-1">
-                      <div>P: AED {order.payment_fees?.toFixed(2) || '0.00'}</div>
-                      <div>D: AED {order.delivery_fees?.toFixed(2) || '0.00'}</div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                      order.status === 'completed' ? 'bg-green-100 text-green-800' :
-                      order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-red-100 text-red-800'
-                    }`}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    <div className="flex items-center">
-                      <Calendar className="h-4 w-4 text-muted-foreground mr-1" />
-                      {formatDate(order.created_at)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleOpenExchangeModal(order)}
-                        className="text-orange-600 hover:text-orange-800"
-                        title="Exchange Order"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleEditOrder(order)}
-                        className="text-blue-600 hover:text-blue-800"
-                        title="Edit Order"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteOrder(order.id)}
-                        className="text-red-600 hover:text-red-800"
-                        title="Delete Order"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
         
         {orders.length === 0 && (
           <div className="text-center py-12">
@@ -1525,10 +1614,11 @@ export default function OrdersPage() {
                   
                   <div className="space-y-3">
                     {/* Header Row - Hidden on mobile */}
-                    <div className="hidden sm:grid grid-cols-7 gap-2 p-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="hidden sm:grid grid-cols-8 gap-2 p-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       <div>Product</div>
                       <div>Size</div>
                       <div>Qty</div>
+                      <div>Cost</div>
                       <div>Price</div>
                       <div>Total</div>
                       <div>Stock</div>
@@ -1587,17 +1677,31 @@ export default function OrdersPage() {
                               />
                             </div>
                           </div>
-                          <div>
-                            <label className="block text-xs font-medium text-muted-foreground mb-1">Price per Piece</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder="Price"
-                              value={item.price_per_piece}
-                              onChange={(e) => updateOrderItem(index, 'price_per_piece', parseFloat(e.target.value) || 0)}
-                              className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
-                              required
-                            />
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-medium text-muted-foreground mb-1">Cost per Piece</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="Cost"
+                                value={item.cost_per_piece}
+                                onChange={(e) => updateOrderItem(index, 'cost_per_piece', parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-muted-foreground mb-1">Price per Piece</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="Price"
+                                value={item.price_per_piece}
+                                onChange={(e) => updateOrderItem(index, 'price_per_piece', parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
+                                required
+                              />
+                            </div>
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t">
                             <div>
@@ -1621,7 +1725,7 @@ export default function OrdersPage() {
                         </div>
 
                         {/* Desktop Layout */}
-                        <div className="hidden sm:grid grid-cols-7 gap-2 p-3">
+                        <div className="hidden sm:grid grid-cols-8 gap-2 p-3">
                           <select
                             value={item.product_id}
                             onChange={(e) => handleProductChange(index, e.target.value)}
@@ -1657,6 +1761,15 @@ export default function OrdersPage() {
                             className="px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
                             min="1"
                             max={item.size ? getAvailableQuantity(item.product_id, item.size) : 1}
+                            required
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Cost"
+                            value={item.cost_per_piece}
+                            onChange={(e) => updateOrderItem(index, 'cost_per_piece', parseFloat(e.target.value) || 0)}
+                            className="px-2 py-1 border border-input bg-background rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground"
                             required
                           />
                           <input
@@ -1997,6 +2110,188 @@ export default function OrdersPage() {
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {showEditModal && editingOrder && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+          onClick={() => {
+            setShowEditModal(false)
+            setEditingOrder(null)
+          }}
+        >
+          <div 
+            className="bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto mx-2 sm:mx-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center p-6 border-b border-border">
+              <h2 className="text-xl font-semibold text-foreground">
+                Edit Order #{editingOrder.order_number}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditModal(false)
+                  setEditingOrder(null)
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close modal"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="p-6">
+              <form onSubmit={(e) => {
+                e.preventDefault()
+                const form = e.target as HTMLFormElement
+                const formData = new FormData(form)
+                handleUpdateOrder({
+                  ...editingOrder,
+                  quantity: parseFloat(formData.get('quantity') as string) || editingOrder.quantity,
+                  cost_per_piece: parseFloat(formData.get('cost_per_piece') as string) || editingOrder.cost_per_piece || 0,
+                  price_per_piece: parseFloat(formData.get('price_per_piece') as string) || editingOrder.price_per_piece || 0,
+                  total_price: parseFloat(formData.get('total_price') as string) || editingOrder.total_price,
+                  payment_fees: parseFloat(formData.get('payment_fees') as string) || editingOrder.payment_fees,
+                  delivery_fees: parseFloat(formData.get('delivery_fees') as string) || editingOrder.delivery_fees,
+                  status: (formData.get('status') as string) || editingOrder.status,
+                  payment_method: (formData.get('payment_method') as string) || editingOrder.payment_method
+                })
+              }} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Quantity
+                    </label>
+                    <input
+                      type="number"
+                      name="quantity"
+                      defaultValue={editingOrder.quantity}
+                      min="1"
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Cost per Piece
+                    </label>
+                    <input
+                      type="number"
+                      name="cost_per_piece"
+                      step="0.01"
+                      defaultValue={editingOrder.cost_per_piece || 0}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Price per Piece
+                    </label>
+                    <input
+                      type="number"
+                      name="price_per_piece"
+                      step="0.01"
+                      defaultValue={editingOrder.price_per_piece || 0}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Total Price
+                    </label>
+                    <input
+                      type="number"
+                      name="total_price"
+                      step="0.01"
+                      defaultValue={editingOrder.total_price}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Payment Method
+                    </label>
+                    <select
+                      name="payment_method"
+                      defaultValue={editingOrder.payment_method}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="tabby">Tabby</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Status
+                    </label>
+                    <select
+                      name="status"
+                      defaultValue={editingOrder.status}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                      required
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="completed">Completed</option>
+                      <option value="canceled">Canceled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Payment Fees (AED)
+                    </label>
+                    <input
+                      type="number"
+                      name="payment_fees"
+                      step="0.01"
+                      defaultValue={editingOrder.payment_fees}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Delivery Fees (AED)
+                    </label>
+                    <input
+                      type="number"
+                      name="delivery_fees"
+                      step="0.01"
+                      defaultValue={editingOrder.delivery_fees}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-foreground"
+                    />
+                  </div>
+                </div>
+                <div className="pt-4 border-t border-border">
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                    >
+                      Update Order
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEditModal(false)
+                        setEditingOrder(null)
+                      }}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    * Profits will be automatically recalculated based on the updated cost and price values.
+                  </p>
+                </div>
+              </form>
             </div>
           </div>
         </div>
