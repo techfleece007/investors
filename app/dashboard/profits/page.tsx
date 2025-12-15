@@ -767,6 +767,7 @@ export default function ProfitsPage() {
 
       {/* Exchanged Orders Summary */}
       {Object.keys(exchangedOrdersMap).length > 0 && (() => {
+        // Process exchanged orders to extract all original and exchanged items
         const exchangedOrdersList = Object.entries(exchangedOrdersMap)
           .filter(([orderNumber, profits]) => {
             // Include only completed exchanged orders
@@ -776,57 +777,88 @@ export default function ProfitsPage() {
             })
           })
           .map(([orderNumber, profits]) => {
-            // Since original orders are deleted, we extract info from sizes field
-            const exchangedOrder = profits.find(p => {
+            // Get all completed exchanged orders for this order_number (can be multiple)
+            const exchangedOrders = profits.filter(p => {
               const status = p.orders?.status
               return status === 'completed' || status === 'completed (exchanged)'
-            }) || profits[0]
+            })
             
-            const exchangedStatus = exchangedOrder.orders?.status
-            // Only show if exchanged order is completed
-            if (exchangedStatus === 'canceled') return null
+            if (exchangedOrders.length === 0) return null
             
-            // Extract original size from sizes field: "ProductName: NewSize; original size: ProductName: OriginalSize"
-            const sizes = exchangedOrder.orders?.sizes || exchangedOrder.sizes || ''
-            let originalSize = 'N/A'
-            let originalProduct = 'Unknown'
+            // Parse original items from the first order's sizes field
+            // Format: "NewProduct: NewSize; original size: Product1: Size1, Product2: Size2"
+            const firstOrder = exchangedOrders[0]
+            const sizes = firstOrder.orders?.sizes || firstOrder.sizes || ''
             
+            // Extract original items
+            const originalItems: Array<{ product: string; size: string }> = []
             if (sizes.includes('original size:')) {
               const parts = sizes.split('; original size:')
               const originalPart = parts[1]?.trim() || ''
-              // Format: "ProductName: Size"
+              // Format: "Product1: Size1, Product2: Size2"
               if (originalPart) {
-                const originalParts = originalPart.split(':')
-                if (originalParts.length >= 2) {
-                  originalProduct = originalParts[0].trim()
-                  originalSize = originalParts.slice(1).join(':').trim()
-                } else {
-                  originalSize = originalPart
-                }
+                const items = originalPart.split(',').map(item => item.trim())
+                items.forEach(item => {
+                  if (item.includes(':')) {
+                    const [product, ...sizeParts] = item.split(':')
+                    originalItems.push({
+                      product: product.trim(),
+                      size: sizeParts.join(':').trim()
+                    })
+                  } else {
+                    originalItems.push({
+                      product: 'Unknown',
+                      size: item
+                    })
+                  }
+                })
               }
             }
             
-            // Extract new size from sizes field
-            const newSizePart = sizes.split('; original size:')[0] || sizes
-            let exchangedSize = newSizePart
-            if (newSizePart.includes(':')) {
-              const newParts = newSizePart.split(':')
-              if (newParts.length >= 2) {
-                exchangedSize = newParts.slice(1).join(':').trim()
+            // Extract exchanged items (all orders with this order_number)
+            const exchangedItems = exchangedOrders.map(order => {
+              const orderSizes = order.orders?.sizes || order.sizes || ''
+              let exchangedSize = orderSizes
+              if (orderSizes.includes('; original size:')) {
+                const newSizePart = orderSizes.split('; original size:')[0] || orderSizes
+                if (newSizePart.includes(':')) {
+                  const newParts = newSizePart.split(':')
+                  if (newParts.length >= 2) {
+                    exchangedSize = newParts.slice(1).join(':').trim()
+                  }
+                } else {
+                  exchangedSize = newSizePart.trim()
+                }
               }
-            }
+              
+              return {
+                product: order.product_name || 'Unknown',
+                size: exchangedSize,
+                quantity: order.orders?.quantity || order.quantity || 0,
+                price: order.orders?.total_price || 0
+              }
+            })
+            
+            // Calculate totals
+            const originalTotalPrice = originalItems.reduce((sum, item, idx) => {
+              // We don't have original prices, so we'll estimate from exchanged items
+              // or show 0
+              return sum + 0
+            }, 0)
+            
+            const exchangedTotalPrice = exchangedItems.reduce((sum, item) => sum + item.price, 0)
+            const exchangedTotalQty = exchangedItems.reduce((sum, item) => sum + item.quantity, 0)
+            const originalTotalQty = originalItems.length // We don't have original quantities stored
             
             return {
               orderNumber: parseInt(orderNumber),
-              originalProduct: originalProduct,
-              originalSize: originalSize,
-              exchangedProduct: exchangedOrder.product_name || 'Unknown',
-              exchangedSize: exchangedSize,
-              originalQty: 0, // Original order is deleted, we don't have this info
-              exchangedQty: exchangedOrder.orders?.quantity || exchangedOrder.quantity || 0,
-              originalPrice: 0, // Original order is deleted, we don't have this info
-              exchangedPrice: exchangedOrder.orders?.total_price || 0,
-              priceDifference: exchangedOrder.orders?.total_price || 0 // Can't calculate difference without original
+              originalItems: originalItems,
+              exchangedItems: exchangedItems,
+              originalTotalQty: originalTotalQty,
+              exchangedTotalQty: exchangedTotalQty,
+              originalTotalPrice: originalTotalPrice,
+              exchangedTotalPrice: exchangedTotalPrice,
+              priceDifference: exchangedTotalPrice - originalTotalPrice
             }
           })
           .filter((order): order is NonNullable<typeof order> => order !== null && order !== undefined)
@@ -842,40 +874,63 @@ export default function ProfitsPage() {
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-left p-2 font-semibold text-foreground">Order #</th>
-                    <th className="text-left p-2 font-semibold text-foreground">Original</th>
-                    <th className="text-left p-2 font-semibold text-foreground">Size</th>
-                    <th className="text-left p-2 font-semibold text-foreground">Exchanged</th>
-                    <th className="text-left p-2 font-semibold text-foreground">Size</th>
-                    <th className="text-right p-2 font-semibold text-foreground">Qty</th>
-                    <th className="text-right p-2 font-semibold text-foreground">Qty</th>
-                    <th className="text-right p-2 font-semibold text-foreground">Price</th>
-                    <th className="text-right p-2 font-semibold text-foreground">Price</th>
-                    <th className="text-right p-2 font-semibold text-foreground">Diff</th>
+                    <th className="text-left p-2 font-semibold text-foreground">Original Items</th>
+                    <th className="text-left p-2 font-semibold text-foreground">Exchanged Items</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Original Total</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Exchanged Total</th>
+                    <th className="text-right p-2 font-semibold text-foreground">Price Diff</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {exchangedOrdersList.map((order) => (
-                    <tr key={order.orderNumber || 'unknown'} className="border-b border-border/50 hover:bg-muted/30">
-                      <td className="p-2 text-foreground font-medium">#{order.orderNumber || 'N/A'}</td>
-                      <td className="p-2 text-foreground">{order.originalProduct}</td>
-                      <td className="p-2 text-foreground">
-                        {order.originalSize !== 'N/A' ? (
-                          <span className="text-orange-600 dark:text-orange-400">{order.originalSize}</span>
-                        ) : (
-                          'N/A'
+                  {exchangedOrdersList.map((order) => {
+                    const maxRows = Math.max(order.originalItems.length, order.exchangedItems.length)
+                    return Array.from({ length: maxRows }).map((_, rowIndex) => (
+                      <tr key={`${order.orderNumber}-${rowIndex}`} className="border-b border-border/50 hover:bg-muted/30">
+                        {rowIndex === 0 && (
+                          <td className="p-2 text-foreground font-medium" rowSpan={maxRows || 1}>
+                            #{order.orderNumber || 'N/A'}
+                          </td>
                         )}
-                      </td>
-                      <td className="p-2 text-foreground font-medium">{order.exchangedProduct}</td>
-                      <td className="p-2 text-foreground">{order.exchangedSize}</td>
-                      <td className="p-2 text-right text-foreground">{order.originalQty}</td>
-                      <td className="p-2 text-right text-foreground">{order.exchangedQty}</td>
-                      <td className="p-2 text-right text-foreground">{formatCurrency(order.originalPrice)}</td>
-                      <td className="p-2 text-right text-foreground">{formatCurrency(order.exchangedPrice)}</td>
-                      <td className={`p-2 text-right font-medium ${order.priceDifference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {order.priceDifference >= 0 ? '+' : ''}{formatCurrency(order.priceDifference)}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="p-2 text-foreground">
+                          {order.originalItems[rowIndex] ? (
+                            <>
+                              <div className="font-medium">{order.originalItems[rowIndex].product}</div>
+                              <div className="text-xs text-orange-600 dark:text-orange-400">
+                                Size: {order.originalItems[rowIndex].size}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        <td className="p-2 text-foreground">
+                          {order.exchangedItems[rowIndex] ? (
+                            <>
+                              <div className="font-medium">{order.exchangedItems[rowIndex].product}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Size: {order.exchangedItems[rowIndex].size} | Qty: {order.exchangedItems[rowIndex].quantity}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        {rowIndex === 0 && (
+                          <>
+                            <td className="p-2 text-right text-foreground" rowSpan={maxRows || 1}>
+                              {order.originalTotalPrice > 0 ? formatCurrency(order.originalTotalPrice) : 'N/A'}
+                            </td>
+                            <td className="p-2 text-right text-foreground" rowSpan={maxRows || 1}>
+                              {formatCurrency(order.exchangedTotalPrice)}
+                            </td>
+                            <td className={`p-2 text-right font-medium ${order.priceDifference >= 0 ? 'text-green-600' : 'text-red-600'}`} rowSpan={maxRows || 1}>
+                              {order.priceDifference >= 0 ? '+' : ''}{formatCurrency(order.priceDifference)}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))
+                  })}
                 </tbody>
               </table>
             </div>
@@ -891,45 +946,50 @@ export default function ProfitsPage() {
                     </span>
                   </div>
                   
-                  <div className="space-y-3 text-sm">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-muted-foreground">Original Product:</span>
-                        <p className="font-medium text-foreground">{order.originalProduct}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Size: {order.originalSize !== 'N/A' ? (
-                            <span className="text-orange-600 dark:text-orange-400">{order.originalSize}</span>
-                          ) : (
-                            'N/A'
-                          )}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Exchanged Product:</span>
-                        <p className="font-medium text-foreground">{order.exchangedProduct}</p>
-                        <p className="text-xs text-muted-foreground">Size: {order.exchangedSize}</p>
+                  <div className="space-y-4 text-sm">
+                    {/* Original Items */}
+                    <div>
+                      <h4 className="font-medium text-orange-600 dark:text-orange-400 mb-2">Original Items:</h4>
+                      {order.originalItems.length > 0 ? (
+                        <div className="space-y-2">
+                          {order.originalItems.map((item, idx) => (
+                            <div key={idx} className="pl-2 border-l-2 border-orange-300">
+                              <div className="font-medium">{item.product}</div>
+                              <div className="text-xs text-muted-foreground">Size: {item.size}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground">N/A</p>
+                      )}
+                    </div>
+                    
+                    {/* Exchanged Items */}
+                    <div>
+                      <h4 className="font-medium text-green-600 dark:text-green-400 mb-2">Exchanged Items:</h4>
+                      <div className="space-y-2">
+                        {order.exchangedItems.map((item, idx) => (
+                          <div key={idx} className="pl-2 border-l-2 border-green-300">
+                            <div className="font-medium">{item.product}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Size: {item.size} | Qty: {item.quantity} | Price: {formatCurrency(item.price)}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-muted-foreground">Original Qty:</span>
-                        <span className="ml-1 font-medium">{order.originalQty}</span>
+                    {/* Totals */}
+                    <div className="pt-2 border-t border-border">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Original Total:</span>
+                        <span className="font-medium">
+                          {order.originalTotalPrice > 0 ? formatCurrency(order.originalTotalPrice) : 'N/A'}
+                        </span>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">Exchanged Qty:</span>
-                        <span className="ml-1 font-medium">{order.exchangedQty}</span>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-muted-foreground">Original Price:</span>
-                        <span className="ml-1 font-medium">{formatCurrency(order.originalPrice)}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Exchanged Price:</span>
-                        <span className="ml-1 font-medium">{formatCurrency(order.exchangedPrice)}</span>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Exchanged Total:</span>
+                        <span className="font-medium">{formatCurrency(order.exchangedTotalPrice)}</span>
                       </div>
                     </div>
                   </div>
@@ -971,32 +1031,25 @@ export default function ProfitsPage() {
           // Get the final orders (after handling exchanges)
           const finalOrders = Object.values(ordersByOrderNumber)
           
-          // Create a set of order numbers that were exchanged
-          const exchangedOrderNumbers = new Set(Object.keys(exchangedOrdersMap).map(n => parseInt(n)))
-          
-          // Group by product name and sum quantities
+          // Group by product name and sum quantities (combine exchanged and non-exchanged for same product)
           const productSales = finalOrders.reduce((acc, profit) => {
             const productName = profit.product_name || 'Unknown Product'
-            const orderNumber = profit.order_number || profit.orders?.order_number
-            const isExchanged = orderNumber ? exchangedOrderNumbers.has(orderNumber) : false
             const quantity = profit.orders?.quantity || profit.quantity || 0
             
-            const key = `${productName}${isExchanged ? ' (exchanged)' : ''}`
-            
-            if (!acc[key]) {
-              acc[key] = {
+            // Use product name as key (don't separate exchanged products)
+            if (!acc[productName]) {
+              acc[productName] = {
                 name: productName,
                 totalQuantity: 0,
-                totalRevenue: 0,
-                isExchanged: isExchanged
+                totalRevenue: 0
               }
             }
             
-            acc[key].totalQuantity += quantity
-            acc[key].totalRevenue += profit.orders?.total_price || 0
+            acc[productName].totalQuantity += quantity
+            acc[productName].totalRevenue += profit.orders?.total_price || 0
             
             return acc
-          }, {} as Record<string, { name: string; totalQuantity: number; totalRevenue: number; isExchanged: boolean }>)
+          }, {} as Record<string, { name: string; totalQuantity: number; totalRevenue: number }>)
           
           const productSalesArray = Object.values(productSales).sort((a, b) => b.totalQuantity - a.totalQuantity)
           
@@ -1023,11 +1076,6 @@ export default function ProfitsPage() {
                       <tr key={index} className="border-b border-border/50 hover:bg-muted/30">
                         <td className="p-2 text-foreground">
                           {product.name}
-                          {product.isExchanged && (
-                            <span className="ml-2 px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                              Exchanged
-                            </span>
-                          )}
                         </td>
                         <td className="p-2 text-right font-medium text-foreground">{product.totalQuantity}</td>
                         <td className="p-2 text-right font-medium text-foreground">{formatCurrency(product.totalRevenue)}</td>
@@ -1051,11 +1099,6 @@ export default function ProfitsPage() {
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <h3 className="font-semibold text-foreground">{product.name}</h3>
-                        {product.isExchanged && (
-                          <span className="mt-1 inline-block px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                            Exchanged
-                          </span>
-                        )}
                       </div>
                       <span className="text-lg font-bold text-green-600">{formatCurrency(product.totalRevenue)}</span>
                     </div>
