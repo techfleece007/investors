@@ -75,14 +75,14 @@ const sortVariantsBySize = (variants: ProductVariant[]) => {
 interface ExchangeData {
   order: Order | null
   originalOrderDetails: any[]
-  newProduct: {
+  newProducts: {
     product_id: string
     product_name: string
     size: string
     quantity: number
     price_per_piece: number
     total_price: number
-  }
+  }[]
 }
 
 export default function OrdersPage() {
@@ -100,14 +100,7 @@ export default function OrdersPage() {
   const [exchangeData, setExchangeData] = useState<ExchangeData>({
     order: null,
     originalOrderDetails: [],
-    newProduct: {
-      product_id: '',
-      product_name: '',
-      size: '',
-      quantity: 1,
-      price_per_piece: 0,
-      total_price: 0
-    }
+    newProducts: []
   })
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [filters, setFilters] = useState({
@@ -927,19 +920,11 @@ export default function OrdersPage() {
         return
       }
 
-      // Set exchange data with the first item as the one to exchange
-      const firstOrder = orderData[0]
+      // Initialize with empty new products array - user will add items to exchange
       setExchangeData({
         order: order,
         originalOrderDetails: orderData,
-        newProduct: {
-          product_id: firstOrder.product_id.toString(),
-          product_name: (firstOrder.products as any)?.name || 'Unknown Product',
-          size: firstOrder.sizes || '',
-          quantity: firstOrder.quantity,
-          price_per_piece: firstOrder.total_price / firstOrder.quantity,
-          total_price: firstOrder.total_price
-        }
+        newProducts: []
       })
       setShowExchangeModal(true)
     } catch (error) {
@@ -948,104 +933,143 @@ export default function OrdersPage() {
     }
   }
 
-  const handleExchangeProductChange = (productId: string) => {
+  const handleExchangeProductChange = (index: number, productId: string) => {
     const product = products.find(p => p.id.toString() === productId)
     
     if (product) {
-      setExchangeData(prev => ({
-        ...prev,
-        newProduct: {
-          ...prev.newProduct,
+      setExchangeData(prev => {
+        const newProducts = [...prev.newProducts]
+        newProducts[index] = {
+          ...newProducts[index],
           product_id: productId,
           product_name: product.name,
           price_per_piece: product.price_per_piece,
-          total_price: product.price_per_piece * prev.newProduct.quantity,
+          total_price: product.price_per_piece * (newProducts[index]?.quantity || 1),
           size: '' // Reset size when product changes
         }
-      }))
+        return { ...prev, newProducts }
+      })
     }
   }
 
-  const handleExchangeSizeChange = (size: string) => {
+  const handleExchangeSizeChange = (index: number, size: string) => {
+    const currentProduct = exchangeData.newProducts[index]
+    if (!currentProduct) return
+    
     const variant = productVariants.find(v => 
-      v.product_id.toString() === exchangeData.newProduct.product_id && v.size === size
+      v.product_id.toString() === currentProduct.product_id && v.size === size
     )
     
     if (variant) {
-      setExchangeData(prev => ({
-        ...prev,
-        newProduct: {
-          ...prev.newProduct,
+      setExchangeData(prev => {
+        const newProducts = [...prev.newProducts]
+        newProducts[index] = {
+          ...newProducts[index],
           size: size,
           price_per_piece: variant.price,
-          total_price: variant.price * prev.newProduct.quantity
+          total_price: variant.price * (newProducts[index]?.quantity || 1)
         }
-      }))
+        return { ...prev, newProducts }
+      })
     }
   }
 
-  const handleExchangeQuantityChange = (quantity: number) => {
+  const handleExchangeQuantityChange = (index: number, quantity: number) => {
+    setExchangeData(prev => {
+      const newProducts = [...prev.newProducts]
+      newProducts[index] = {
+        ...newProducts[index],
+        quantity: quantity,
+        total_price: (newProducts[index]?.price_per_piece || 0) * quantity
+      }
+      return { ...prev, newProducts }
+    })
+  }
+
+  const handleAddNewProduct = () => {
     setExchangeData(prev => ({
       ...prev,
-      newProduct: {
-        ...prev.newProduct,
-        quantity: quantity,
-        total_price: prev.newProduct.price_per_piece * quantity
-      }
+      newProducts: [
+        ...prev.newProducts,
+        {
+          product_id: '',
+          product_name: '',
+          size: '',
+          quantity: 1,
+          price_per_piece: 0,
+          total_price: 0
+        }
+      ]
+    }))
+  }
+
+  const handleRemoveNewProduct = (index: number) => {
+    setExchangeData(prev => ({
+      ...prev,
+      newProducts: prev.newProducts.filter((_, i) => i !== index)
     }))
   }
 
   const handleExchangeSubmit = async () => {
-    if (!exchangeData.order || !exchangeData.newProduct.product_id || !exchangeData.newProduct.size) {
-      alert('Please select a product and size for the exchange')
+    if (!exchangeData.order || exchangeData.newProducts.length === 0) {
+      alert('Please add at least one product for the exchange')
       return
     }
 
-    // Validate product exists in our local state
-    const newProduct = products.find(p => p.id.toString() === exchangeData.newProduct.product_id)
-    if (!newProduct) {
-      alert(`Product not found. Please refresh the page and try again.`)
-      return
-    }
+    // Validate all new products
+    for (let i = 0; i < exchangeData.newProducts.length; i++) {
+      const newProduct = exchangeData.newProducts[i]
+      if (!newProduct.product_id || !newProduct.size) {
+        alert(`Please select a product and size for item ${i + 1}`)
+        return
+      }
 
-    // Validate product_id is a valid number
-    const productIdNum = parseInt(exchangeData.newProduct.product_id)
-    if (isNaN(productIdNum)) {
-      alert(`Invalid product ID. Please refresh the page and try again.`)
-      return
-    }
+      // Validate product exists in our local state
+      const product = products.find(p => p.id.toString() === newProduct.product_id)
+      if (!product) {
+        alert(`Product not found for item ${i + 1}. Please refresh the page and try again.`)
+        return
+      }
 
-    // Verify product exists in database before proceeding
-    const { data: verifyProduct, error: verifyError } = await supabase
-      .from('products')
-      .select('id, name')
-      .eq('id', productIdNum)
-      .single()
-    
-    if (verifyError || !verifyProduct) {
-      alert(`Product with ID ${productIdNum} does not exist in database. Error: ${verifyError?.message || 'Product not found'}`)
-      return
-    }
+      // Validate product_id is a valid number
+      const productIdNum = parseInt(newProduct.product_id)
+      if (isNaN(productIdNum)) {
+        alert(`Invalid product ID for item ${i + 1}. Please refresh the page and try again.`)
+        return
+      }
 
-    // Check if there's enough stock for the new product
-    const newVariant = productVariants.find(v => 
-      v.product_id.toString() === exchangeData.newProduct.product_id && v.size === exchangeData.newProduct.size
-    )
-    
-    if (!newVariant) {
-      alert(`Variant not found for ${exchangeData.newProduct.product_name} - Size ${exchangeData.newProduct.size}`)
-      return
-    }
-    
-    if (newVariant.quantity < exchangeData.newProduct.quantity) {
-      alert(`Insufficient stock for ${exchangeData.newProduct.product_name} - Size ${exchangeData.newProduct.size}. Available: ${newVariant.quantity}, Requested: ${exchangeData.newProduct.quantity}`)
-      return
+      // Verify product exists in database before proceeding
+      const { data: verifyProduct, error: verifyError } = await supabase
+        .from('products')
+        .select('id, name')
+        .eq('id', productIdNum)
+        .single()
+      
+      if (verifyError || !verifyProduct) {
+        alert(`Product with ID ${productIdNum} does not exist in database for item ${i + 1}. Error: ${verifyError?.message || 'Product not found'}`)
+        return
+      }
+
+      // Check if there's enough stock for the new product
+      const newVariant = productVariants.find(v => 
+        v.product_id.toString() === newProduct.product_id && v.size === newProduct.size
+      )
+      
+      if (!newVariant) {
+        alert(`Variant not found for ${newProduct.product_name} - Size ${newProduct.size} (item ${i + 1})`)
+        return
+      }
+      
+      if (newVariant.quantity < newProduct.quantity) {
+        alert(`Insufficient stock for ${newProduct.product_name} - Size ${newProduct.size} (item ${i + 1}). Available: ${newVariant.quantity}, Requested: ${newProduct.quantity}`)
+        return
+      }
     }
 
     try {
       const oldOrderDetails = exchangeData.originalOrderDetails
       const oldTotalPrice = oldOrderDetails.reduce((sum, o) => sum + o.total_price, 0)
-      const newTotalPrice = exchangeData.newProduct.total_price
+      const newTotalPrice = exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0)
       const priceDifference = newTotalPrice - oldTotalPrice
 
       // 1. Restore quantities for OLD products (restore stock)
@@ -1084,50 +1108,67 @@ export default function OrdersPage() {
         // Product total quantity will be automatically updated by trigger when variant quantity changes
       }
 
-      // 2. Deduct quantities for NEW product
+      // 2. Deduct quantities for ALL NEW products
       // IMPORTANT: Fetch fresh quantities from database to avoid using stale local state
       // This prevents double-deduction issues when exchanging to same product with different size
       
-      // Fetch current variant quantity from database (after restoring old quantities)
-      // This ensures we have the latest quantity including any restored stock
-      const { data: freshVariant, error: freshVariantError } = await supabase
-        .from('product_variants')
-        .select('quantity')
-        .eq('id', newVariant.id)
-        .single()
+      const newProductVariants: { product: typeof exchangeData.newProducts[0], variant: ProductVariant, freshVariant: any }[] = []
       
-      if (freshVariantError) {
-        console.error('Error fetching fresh variant quantity:', freshVariantError)
-        throw new Error('Failed to fetch current variant quantity')
+      for (const newProduct of exchangeData.newProducts) {
+        const newVariant = productVariants.find(v => 
+          v.product_id.toString() === newProduct.product_id && v.size === newProduct.size
+        )
+        
+        if (!newVariant) {
+          throw new Error(`Variant not found for ${newProduct.product_name} - Size ${newProduct.size}`)
+        }
+        
+        // Fetch current variant quantity from database (after restoring old quantities)
+        // This ensures we have the latest quantity including any restored stock
+        const { data: freshVariant, error: freshVariantError } = await supabase
+          .from('product_variants')
+          .select('quantity')
+          .eq('id', newVariant.id)
+          .single()
+        
+        if (freshVariantError) {
+          console.error('Error fetching fresh variant quantity:', freshVariantError)
+          throw new Error(`Failed to fetch current variant quantity for ${newProduct.product_name}`)
+        }
+        
+        if (!freshVariant) {
+          throw new Error(`Variant not found for ${newProduct.product_name}`)
+        }
+        
+        // Check stock again with fresh data
+        if (freshVariant.quantity < newProduct.quantity) {
+          throw new Error(`Insufficient stock for ${newProduct.product_name} - Size ${newProduct.size}. Available: ${freshVariant.quantity}, Requested: ${newProduct.quantity}`)
+        }
+        
+        newProductVariants.push({ product: newProduct, variant: newVariant, freshVariant })
       }
       
-      if (!freshVariant) {
-        throw new Error('Variant not found')
-      }
-      
-      // Check stock again with fresh data
-      if (freshVariant.quantity < exchangeData.newProduct.quantity) {
-        throw new Error(`Insufficient stock. Available: ${freshVariant.quantity}, Requested: ${exchangeData.newProduct.quantity}`)
-      }
-      
-      // Deduct from variant using fresh database value
-      const { error: variantDeductError } = await supabase
-        .from('product_variants')
-        .update({ quantity: Math.max(0, freshVariant.quantity - exchangeData.newProduct.quantity) })
-        .eq('id', newVariant.id)
-      
-      if (variantDeductError) {
-        console.error('Error deducting variant quantity:', variantDeductError)
-        throw variantDeductError
+      // Now deduct quantities for all new products
+      for (const { product, variant, freshVariant } of newProductVariants) {
+        // Deduct from variant using fresh database value
+        const { error: variantDeductError } = await supabase
+          .from('product_variants')
+          .update({ quantity: Math.max(0, freshVariant.quantity - product.quantity) })
+          .eq('id', variant.id)
+        
+        if (variantDeductError) {
+          console.error('Error deducting variant quantity:', variantDeductError)
+          throw variantDeductError
+        }
       }
       
       // Product total quantity will be automatically updated by trigger when variant quantity changes
 
-      // 3. Prepare exchange information before creating new order
-      // Store original sizes for display in the new order
+      // 3. Prepare exchange information before creating new orders
+      // Store original sizes for display in the new orders
       const originalSizes = oldOrderDetails.map(o => `${(o.products as any)?.name || 'Unknown Product'}: ${o.sizes}`).join(', ')
       
-      // 4. Create a NEW order row for the exchanged product (instead of updating)
+      // 4. Create NEW order rows for all exchanged products (instead of updating)
       // This replaces the original order completely
       // IMPORTANT: Keep the original payment fees from the old order
       // If price is higher, the difference is paid by cash (no fees on difference)
@@ -1139,58 +1180,76 @@ export default function OrdersPage() {
       // - If new price > old price: still keep original method (difference paid by cash, but we don't add fees)
       const paymentMethod = oldOrderDetails[0].payment_method
       
-      // Get cost and price for the new product (already validated above)
-      // newProduct and verifyProduct are already validated and verified in database above
-      // Fetch full product data to get cost_per_piece
-      const { data: fullProductData, error: productDataError } = await supabase
-        .from('products')
-        .select('cost_per_piece, price_per_piece')
-        .eq('id', productIdNum)
-        .single()
-      
-      if (productDataError) {
-        console.error('Error fetching product data:', productDataError)
-        // Use fallback values from local state
-      }
-      
-      // newVariant is already declared above, reuse it
-      const costPerPiece = newVariant?.cost || fullProductData?.cost_per_piece || newProduct?.cost_per_piece || 0
-      const pricePerPiece = exchangeData.newProduct.price_per_piece || newVariant?.price || fullProductData?.price_per_piece || newProduct?.price_per_piece || 0
-      
-      // Create new order row for the exchanged product
-      // Store original sizes in the sizes field with a special format for display
-      // Format: "ProductName: NewSize; original size: ProductName: OriginalSize"
-      const sizesDisplay = `${exchangeData.newProduct.product_name}: ${exchangeData.newProduct.size}; original size: ${originalSizes}`
-      
-      const { data: newOrderData, error: insertError } = await supabase
-        .from('orders')
-        .insert({
+      // Create order rows for all new products
+      const newOrderRows = []
+      for (const newProduct of exchangeData.newProducts) {
+        const productIdNum = parseInt(newProduct.product_id)
+        const product = products.find(p => p.id.toString() === newProduct.product_id)
+        const variant = productVariants.find(v => 
+          v.product_id.toString() === newProduct.product_id && v.size === newProduct.size
+        )
+        
+        // Fetch full product data to get cost_per_piece
+        const { data: fullProductData } = await supabase
+          .from('products')
+          .select('cost_per_piece, price_per_piece')
+          .eq('id', productIdNum)
+          .single()
+        
+        const costPerPiece = variant?.cost || fullProductData?.cost_per_piece || product?.cost_per_piece || 0
+        const pricePerPiece = newProduct.price_per_piece || variant?.price || fullProductData?.price_per_piece || product?.price_per_piece || 0
+        
+        // Store original sizes in the sizes field with a special format for display
+        // Format: "ProductName: NewSize; original size: ProductName: OriginalSize"
+        const sizesDisplay = `${newProduct.product_name}: ${newProduct.size}; original size: ${originalSizes}`
+        
+        newOrderRows.push({
           product_id: productIdNum,
           order_number: exchangeData.order.order_number,
           shipping_number: exchangeData.order.shipping_number,
-          paid_amount: newTotalPrice,
-          total_price: newTotalPrice,
-          quantity: exchangeData.newProduct.quantity,
+          paid_amount: newProduct.total_price,
+          total_price: newProduct.total_price,
+          quantity: newProduct.quantity,
           sizes: sizesDisplay, // Store with original size info for display
           payment_method: paymentMethod,
-          payment_fees: originalPaymentFees, // Keep original fees, no fees on cash difference
-          delivery_fees: oldOrderDetails[0].delivery_fees,
+          payment_fees: 0, // Will distribute fees proportionally below
+          delivery_fees: 0, // Will distribute fees proportionally below
           status: oldOrderDetails[0].status, // Keep original status (usually 'completed')
           cost_per_piece: costPerPiece, // Store cost at order time
           price_per_piece: pricePerPiece // Store price at order time
         })
+      }
+      
+      // Distribute payment fees and delivery fees proportionally based on total price
+      const totalNewPrice = newOrderRows.reduce((sum, row) => sum + row.total_price, 0)
+      if (totalNewPrice > 0) {
+        for (let i = 0; i < newOrderRows.length; i++) {
+          const proportion = newOrderRows[i].total_price / totalNewPrice
+          newOrderRows[i].payment_fees = originalPaymentFees * proportion
+          newOrderRows[i].delivery_fees = (oldOrderDetails[0].delivery_fees || 0) * proportion
+        }
+      } else {
+        // If total is 0, put all fees on first order
+        if (newOrderRows.length > 0) {
+          newOrderRows[0].payment_fees = originalPaymentFees
+          newOrderRows[0].delivery_fees = oldOrderDetails[0].delivery_fees || 0
+        }
+      }
+      
+      const { data: newOrderData, error: insertError } = await supabase
+        .from('orders')
+        .insert(newOrderRows)
         .select()
-        .single()
 
       if (insertError) {
-        console.error('Error inserting new order:', insertError)
+        console.error('Error inserting new orders:', insertError)
         // If order insertion fails, we need to rollback the quantity changes
-        // Restore the deducted quantity
-        if (freshVariant) {
+        // Restore the deducted quantities
+        for (const { variant, freshVariant } of newProductVariants) {
           await supabase
             .from('product_variants')
             .update({ quantity: freshVariant.quantity })
-            .eq('id', newVariant.id)
+            .eq('id', variant.id)
         }
         // Restore old order quantities (reverse step 1)
         for (const oldOrder of oldOrderDetails) {
@@ -1244,13 +1303,13 @@ export default function OrdersPage() {
           total_price: order.total_price
         }))
 
-        const newItems = [{
-          product_name: exchangeData.newProduct.product_name,
-          size: exchangeData.newProduct.size,
-          quantity: exchangeData.newProduct.quantity,
-          unit_price: exchangeData.newProduct.price_per_piece,
-          total_price: exchangeData.newProduct.total_price
-        }]
+        const newItems = exchangeData.newProducts.map(product => ({
+          product_name: product.product_name,
+          size: product.size,
+          quantity: product.quantity,
+          unit_price: product.price_per_piece,
+          total_price: product.total_price
+        }))
 
         const emailResponse = await fetch('/api/send-exchange-email', {
           method: 'POST',
@@ -1282,14 +1341,7 @@ export default function OrdersPage() {
       setExchangeData({
         order: null,
         originalOrderDetails: [],
-        newProduct: {
-          product_id: '',
-          product_name: '',
-          size: '',
-          quantity: 1,
-          price_per_piece: 0,
-          total_price: 0
-        }
+        newProducts: []
       })
       
       setSuccessMessage(`Order #${exchangedOrderNumber} exchanged successfully!${priceDifference !== 0 ? ` Price difference: AED ${priceDifference.toFixed(2)}` : ''}`)
@@ -1968,14 +2020,7 @@ export default function OrdersPage() {
             setExchangeData({
               order: null,
               originalOrderDetails: [],
-              newProduct: {
-                product_id: '',
-                product_name: '',
-                size: '',
-                quantity: 1,
-                price_per_piece: 0,
-                total_price: 0
-              }
+              newProducts: []
             })
           }}
         >
@@ -1999,14 +2044,7 @@ export default function OrdersPage() {
                   setExchangeData({
                     order: null,
                     originalOrderDetails: [],
-                    newProduct: {
-                      product_id: '',
-                      product_name: '',
-                      size: '',
-                      quantity: 1,
-                      price_per_piece: 0,
-                      total_price: 0
-                    }
+                    newProducts: []
                   })
                 }}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -2041,76 +2079,118 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              {/* New Product Selection */}
+              {/* New Products Selection */}
               <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                <h3 className="text-sm font-medium text-green-800 dark:text-green-200 mb-3 flex items-center gap-2">
-                  <span className="text-lg">✅</span> New Product (Exchange To)
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
-                      Product
-                    </label>
-                    <select
-                      value={exchangeData.newProduct.product_id}
-                      onChange={(e) => handleExchangeProductChange(e.target.value)}
-                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
-                      required
-                    >
-                      <option value="">Select Product</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id.toString()}>
-                          {product.name} (Available: {product.quantity})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
-                      Size
-                    </label>
-                    <select
-                      value={exchangeData.newProduct.size}
-                      onChange={(e) => handleExchangeSizeChange(e.target.value)}
-                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
-                      required
-                      disabled={!exchangeData.newProduct.product_id}
-                    >
-                      <option value="">Select Size</option>
-                      {exchangeData.newProduct.product_id && getAvailableSizes(exchangeData.newProduct.product_id).map((variant) => (
-                        <option key={variant.id} value={variant.size}>
-                          {variant.size} (Available: {variant.quantity})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
-                      Quantity
-                    </label>
-                    <input
-                      type="number"
-                      value={exchangeData.newProduct.quantity}
-                      onChange={(e) => handleExchangeQuantityChange(parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
-                      min="1"
-                      max={exchangeData.newProduct.size ? getAvailableQuantity(exchangeData.newProduct.product_id, exchangeData.newProduct.size) : 1}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">
-                      Price Per Piece
-                    </label>
-                    <div className="w-full px-3 py-2 border border-input bg-muted rounded-md text-foreground">
-                      AED {exchangeData.newProduct.price_per_piece.toFixed(2)}
-                    </div>
-                  </div>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-medium text-green-800 dark:text-green-200 flex items-center gap-2">
+                    <span className="text-lg">✅</span> New Products (Exchange To)
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleAddNewProduct}
+                    className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors flex items-center gap-1"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Product
+                  </button>
                 </div>
+                
+                {exchangeData.newProducts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Click "Add Product" to add items for exchange
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {exchangeData.newProducts.map((newProduct, index) => (
+                      <div key={index} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-green-300 dark:border-green-700">
+                        <div className="flex justify-between items-center mb-3">
+                          <h4 className="text-sm font-medium text-foreground">Item {index + 1}</h4>
+                          {exchangeData.newProducts.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveNewProduct(index)}
+                              className="text-red-600 hover:text-red-800 transition-colors"
+                              aria-label="Remove product"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-foreground mb-2">
+                              Product
+                            </label>
+                            <select
+                              value={newProduct.product_id}
+                              onChange={(e) => handleExchangeProductChange(index, e.target.value)}
+                              className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
+                              required
+                            >
+                              <option value="">Select Product</option>
+                              {products.map((product) => (
+                                <option key={product.id} value={product.id.toString()}>
+                                  {product.name} (Available: {product.quantity})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-foreground mb-2">
+                              Size
+                            </label>
+                            <select
+                              value={newProduct.size}
+                              onChange={(e) => handleExchangeSizeChange(index, e.target.value)}
+                              className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
+                              required
+                              disabled={!newProduct.product_id}
+                            >
+                              <option value="">Select Size</option>
+                              {newProduct.product_id && getAvailableSizes(newProduct.product_id).map((variant) => (
+                                <option key={variant.id} value={variant.size}>
+                                  {variant.size} (Available: {variant.quantity})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-foreground mb-2">
+                              Quantity
+                            </label>
+                            <input
+                              type="number"
+                              value={newProduct.quantity}
+                              onChange={(e) => handleExchangeQuantityChange(index, parseInt(e.target.value) || 1)}
+                              className="w-full px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 text-foreground"
+                              min="1"
+                              max={newProduct.size ? getAvailableQuantity(newProduct.product_id, newProduct.size) : 1}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-foreground mb-2">
+                              Price Per Piece
+                            </label>
+                            <div className="w-full px-3 py-2 border border-input bg-muted rounded-md text-foreground">
+                              AED {newProduct.price_per_piece.toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-green-200 dark:border-green-700 flex justify-between text-sm">
+                          <span className="font-medium text-green-800 dark:text-green-200">Item Total:</span>
+                          <span className="font-bold text-green-600">
+                            AED {newProduct.total_price.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-4 pt-2 border-t border-green-300 dark:border-green-700 flex justify-between">
                   <span className="font-medium text-green-800 dark:text-green-200">New Total:</span>
                   <span className="font-bold text-green-600">
-                    AED {exchangeData.newProduct.total_price.toFixed(2)}
+                    AED {exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -2127,23 +2207,23 @@ export default function OrdersPage() {
                   </div>
                   <div className="flex justify-between">
                     <span>New Order Total:</span>
-                    <span>AED {exchangeData.newProduct.total_price.toFixed(2)}</span>
+                    <span>AED {exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-amber-300 dark:border-amber-700 font-bold">
                     <span>Price Difference:</span>
                     <span className={
-                      exchangeData.newProduct.total_price - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) >= 0 
+                      exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0) - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) >= 0 
                         ? 'text-green-600' 
                         : 'text-red-600'
                     }>
-                      {exchangeData.newProduct.total_price - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) >= 0 ? '+' : ''}
-                      AED {(exchangeData.newProduct.total_price - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0)).toFixed(2)}
+                      {exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0) - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) >= 0 ? '+' : ''}
+                      AED {(exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0) - exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0)).toFixed(2)}
                     </span>
                   </div>
                 </div>
-                {exchangeData.newProduct.total_price !== exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) && (
+                {exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0) !== exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0) && (
                   <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
-                    {exchangeData.newProduct.total_price > exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0)
+                    {exchangeData.newProducts.reduce((sum, p) => sum + p.total_price, 0) > exchangeData.originalOrderDetails.reduce((sum, o) => sum + o.total_price, 0)
                       ? '💰 Customer owes additional payment (paid by cash - no payment fees on difference)'
                       : '💸 Customer is owed a refund'}
                   </p>
@@ -2169,7 +2249,7 @@ export default function OrdersPage() {
                 <button
                   type="button"
                   onClick={handleExchangeSubmit}
-                  disabled={!exchangeData.newProduct.product_id || !exchangeData.newProduct.size}
+                  disabled={exchangeData.newProducts.length === 0 || exchangeData.newProducts.some(p => !p.product_id || !p.size)}
                   className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -2182,14 +2262,7 @@ export default function OrdersPage() {
                     setExchangeData({
                       order: null,
                       originalOrderDetails: [],
-                      newProduct: {
-                        product_id: '',
-                        product_name: '',
-                        size: '',
-                        quantity: 1,
-                        price_per_piece: 0,
-                        total_price: 0
-                      }
+                      newProducts: []
                     })
                   }}
                   className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors"
