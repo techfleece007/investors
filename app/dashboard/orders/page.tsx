@@ -1220,19 +1220,26 @@ export default function OrdersPage() {
         })
       }
       
-      // Distribute payment fees and delivery fees proportionally based on total price
+      // Distribute payment fees proportionally based on total price
+      // Keep delivery fees the same as original order (put full amount on first order row)
+      const originalDeliveryFees = oldOrderDetails.reduce((sum, o) => sum + (o.delivery_fees || 0), 0)
       const totalNewPrice = newOrderRows.reduce((sum, row) => sum + row.total_price, 0)
       if (totalNewPrice > 0) {
         for (let i = 0; i < newOrderRows.length; i++) {
           const proportion = newOrderRows[i].total_price / totalNewPrice
           newOrderRows[i].payment_fees = originalPaymentFees * proportion
-          newOrderRows[i].delivery_fees = (oldOrderDetails[0].delivery_fees || 0) * proportion
+          // Delivery fees stay the same as original - put full amount on first order only
+          if (i === 0) {
+            newOrderRows[i].delivery_fees = originalDeliveryFees
+          } else {
+            newOrderRows[i].delivery_fees = 0
+          }
         }
       } else {
         // If total is 0, put all fees on first order
         if (newOrderRows.length > 0) {
           newOrderRows[0].payment_fees = originalPaymentFees
-          newOrderRows[0].delivery_fees = oldOrderDetails[0].delivery_fees || 0
+          newOrderRows[0].delivery_fees = originalDeliveryFees
         }
       }
       
