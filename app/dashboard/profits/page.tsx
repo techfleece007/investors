@@ -741,27 +741,37 @@ export default function ProfitsPage() {
         <h3 className="text-xl font-semibold text-foreground mb-6">Product Sales Breakdown</h3>
         <p className="text-sm text-muted-foreground mb-4">Quantity sold per product (Completed orders only, exchanges included)</p>
         {(() => {
-          // Handle exchanges: Group by order_number and take the most recent order (highest order_id)
-          // This ensures if an order was exchanged, we count the exchanged product, not the original
-          const ordersByOrderNumber = completedOrders.reduce((acc, profit) => {
+          // Handle exchanges: Group by order_number and find the most recent order_id for each order_number
+          // This ensures if an order was exchanged, we count the exchanged products, not the original
+          const maxOrderIdByOrderNumber = completedOrders.reduce((acc, profit) => {
             const orderNumber = profit.order_number || profit.orders?.order_number
             if (!orderNumber) return acc
             
             const orderId = parseInt(profit.order_id) || 0
-            const existing = acc[orderNumber]
+            const existingMax = acc[orderNumber] || 0
             
-            // If no existing order for this order_number, or this order_id is higher (more recent), use this one
-            if (!existing || orderId > (parseInt(existing.order_id) || 0)) {
-              acc[orderNumber] = profit
+            // Keep track of the maximum order_id for each order_number
+            if (orderId > existingMax) {
+              acc[orderNumber] = orderId
             }
             
             return acc
-          }, {} as Record<number, Profit>)
+          }, {} as Record<number, number>)
           
-          // Get the final orders (after handling exchanges)
-          const finalOrders = Object.values(ordersByOrderNumber)
+          // Filter to keep only the most recent orders (highest order_id) for each order_number
+          // This handles exchanges by keeping only the exchanged products
+          const finalOrders = completedOrders.filter(profit => {
+            const orderNumber = profit.order_number || profit.orders?.order_number
+            if (!orderNumber) return false
+            
+            const orderId = parseInt(profit.order_id) || 0
+            const maxOrderId = maxOrderIdByOrderNumber[orderNumber]
+            
+            // Keep this profit record only if it belongs to the most recent order_id for this order_number
+            return orderId === maxOrderId
+          })
           
-          // Group by product name and sum quantities (combine exchanged and non-exchanged for same product)
+          // Group by product name and sum quantities (combine all products from all orders)
           const productSales = finalOrders.reduce((acc, profit) => {
             const productName = profit.product_name || 'Unknown Product'
             const quantity = profit.orders?.quantity || profit.quantity || 0
