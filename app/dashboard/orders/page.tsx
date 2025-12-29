@@ -455,7 +455,9 @@ export default function OrdersPage() {
       const totalOrderAmount = orderItems.reduce((sum, item) => sum + item.total_price, 0)
 
       // Create separate order row for each product
-      for (const item of orderItems) {
+      // Delivery fees should be 20 total per order number (only first item gets it, rest get 0)
+      for (let i = 0; i < orderItems.length; i++) {
+        const item = orderItems[i]
         // Get product and variant to store cost and price at order time
         const product = products.find(p => p.id.toString() === item.product_id)
         const variant = productVariants.find(v => 
@@ -465,6 +467,13 @@ export default function OrdersPage() {
         // Use the cost and price entered in the form (user can override product/variant defaults)
         const costPerPiece = item.cost_per_piece || variant?.cost || product?.cost_per_piece || 0
         const pricePerPiece = item.price_per_piece || variant?.price || product?.price_per_piece || 0
+        
+        // Distribute payment fees proportionally, but delivery fees only on first item
+        const totalOrderAmount = orderItems.reduce((sum, item) => sum + item.total_price, 0)
+        const paymentFeesForItem = totalOrderAmount > 0 
+          ? (item.total_price / totalOrderAmount) * formData.payment_fees 
+          : (i === 0 ? formData.payment_fees : 0)
+        const deliveryFeesForItem = i === 0 ? formData.delivery_fees : 0 // Only first item gets delivery fee
         
         const { error: orderError } = await supabase
           .from('orders')
@@ -477,8 +486,8 @@ export default function OrdersPage() {
             quantity: item.quantity,
             sizes: item.size, // Single size per product row
             payment_method: formData.payment_method,
-            payment_fees: formData.payment_fees / orderItems.length, // Distribute fees across products
-            delivery_fees: formData.delivery_fees / orderItems.length, // Distribute fees across products
+            payment_fees: paymentFeesForItem, // Distribute payment fees proportionally
+            delivery_fees: deliveryFeesForItem, // Only first item gets delivery fee (20 total per order)
             status: formData.status,
             cost_per_piece: costPerPiece, // Store cost at order time
             price_per_piece: pricePerPiece // Store price at order time
@@ -629,58 +638,116 @@ export default function OrdersPage() {
       const oldOrder = editingOrder
       if (!oldOrder) return
 
-      // Update the order with new values
-      const { error: updateError } = await supabase
+      // Get all orders with the same order number to handle quantity updates for all items
+      const { data: allOrderItems, error: fetchError } = await supabase
         .from('orders')
-        .update({
-          total_price: updatedOrder.total_price,
-          quantity: updatedOrder.quantity,
-          cost_per_piece: updatedOrder.cost_per_piece,
-          price_per_piece: updatedOrder.price_per_piece,
-          payment_fees: updatedOrder.payment_fees,
-          delivery_fees: updatedOrder.delivery_fees,
-          status: updatedOrder.status,
-          payment_method: updatedOrder.payment_method
-        })
-        .eq('id', oldOrder.id)
+        .select('*')
+        .eq('order_number', oldOrder.order_number)
 
-      if (updateError) throw updateError
+      if (fetchError) throw fetchError
 
-      // Handle status changes for inventory
+      // If status is changing, update ALL orders with the same order number to the new status
+      // Otherwise, only update the specific order being edited
+      if (updatedOrder.status !== oldOrder.status) {
+        // Update status for all orders with the same order number
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({ status: updatedOrder.status })
+          .eq('order_number', oldOrder.order_number)
+
+        if (updateError) throw updateError
+
+        // Update the specific order with other values (price, quantity, etc.)
+        const { error: updateSpecificError } = await supabase
+          .from('orders')
+          .update({
+            total_price: updatedOrder.total_price,
+            quantity: updatedOrder.quantity,
+            cost_per_piece: updatedOrder.cost_per_piece,
+            price_per_piece: updatedOrder.price_per_piece,
+            payment_fees: updatedOrder.payment_fees,
+            delivery_fees: updatedOrder.delivery_fees,
+            payment_method: updatedOrder.payment_method
+          })
+          .eq('id', oldOrder.id)
+
+        if (updateSpecificError) throw updateSpecificError
+      } else {
+        // Update the order with new values (status not changing)
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            total_price: updatedOrder.total_price,
+            quantity: updatedOrder.quantity,
+            cost_per_piece: updatedOrder.cost_per_piece,
+            price_per_piece: updatedOrder.price_per_piece,
+            payment_fees: updatedOrder.payment_fees,
+            delivery_fees: updatedOrder.delivery_fees,
+            status: updatedOrder.status,
+            payment_method: updatedOrder.payment_method
+          })
+          .eq('id', oldOrder.id)
+
+        if (updateError) throw updateError
+      }
+
+      // Handle status changes for inventory - update ALL items with the same order number
       if (updatedOrder.status !== oldOrder.status) {
         const oldStatus = oldOrder.status
         const newStatus = updatedOrder.status
 
-        // Handle quantity restoration for canceled orders
+        // Handle quantity restoration for canceled orders - restore quantities for ALL items
         if (newStatus === 'canceled' && oldStatus !== 'canceled') {
-          const variant = productVariants.find(v => 
-            v.product_id.toString() === oldOrder.product_id?.toString() && v.size === oldOrder.sizes
-          )
-          
-          if (variant) {
-            await supabase
-              .from('product_variants')
-              .update({ quantity: variant.quantity + oldOrder.quantity })
-              .eq('id', variant.id)
+          // Restore quantities for all products in this order
+          for (const orderItem of allOrderItems || []) {
+            // Find the product variant to restore quantity
+            const variant = productVariants.find(v => 
+              v.product_id.toString() === orderItem.product_id?.toString() && v.size === orderItem.sizes
+            )
+            
+            if (variant) {
+              // Restore variant quantity
+              const { error: variantError } = await supabase
+                .from('product_variants')
+                .update({ 
+                  quantity: variant.quantity + orderItem.quantity 
+                })
+                .eq('id', variant.id)
+
+              if (variantError) {
+                console.error('Error restoring variant quantity:', variantError)
+              }
+            }
+            
+            // Product total quantity will be automatically updated by trigger when variant quantity changes
           }
-          
-          // Product total quantity will be automatically updated by trigger when variant quantity changes
         }
 
-        // Handle quantity deduction for completed orders (from canceled)
+        // Handle quantity deduction for completed orders (from canceled) - deduct quantities for ALL items
         if (newStatus === 'completed' && oldStatus === 'canceled') {
-          const variant = productVariants.find(v => 
-            v.product_id.toString() === oldOrder.product_id?.toString() && v.size === oldOrder.sizes
-          )
-          
-          if (variant) {
-            await supabase
-              .from('product_variants')
-              .update({ quantity: Math.max(0, variant.quantity - updatedOrder.quantity) })
-              .eq('id', variant.id)
+          // Deduct quantities for all products in this order
+          for (const orderItem of allOrderItems || []) {
+            // Find the product variant to deduct quantity
+            const variant = productVariants.find(v => 
+              v.product_id.toString() === orderItem.product_id?.toString() && v.size === orderItem.sizes
+            )
+            
+            if (variant) {
+              // Deduct variant quantity
+              const { error: variantError } = await supabase
+                .from('product_variants')
+                .update({ 
+                  quantity: Math.max(0, variant.quantity - orderItem.quantity)
+                })
+                .eq('id', variant.id)
+
+              if (variantError) {
+                console.error('Error deducting variant quantity:', variantError)
+              }
+            }
+            
+            // Product total quantity will be automatically updated by trigger when variant quantity changes
           }
-          
-          // Product total quantity will be automatically updated by trigger when variant quantity changes
         }
       }
 

@@ -295,7 +295,13 @@ export default function ProductsPage() {
             <div className="aspect-square relative bg-muted">
               {product.image_url ? (
                 <Image
-                  src={product.image_url.startsWith('/') ? product.image_url : `/images/${product.image_url}`}
+                  src={
+                    product.image_url.startsWith('http://') || product.image_url.startsWith('https://')
+                      ? product.image_url
+                      : product.image_url.startsWith('/')
+                      ? product.image_url
+                      : `/images/${product.image_url}`
+                  }
                   alt={product.name}
                   fill
                   className="object-cover"
@@ -498,7 +504,7 @@ export default function ProductsPage() {
                         placeholder="e.g., nike-new-black.jpg"
                       />
                       <p className="text-xs text-muted-foreground mt-1">
-                        Available images: nike-new-black.jpg, nocta-black-zip.jpg, etc.
+                        Enter image filename (e.g., nike-new-black.jpg), path (e.g., /images/filename.jpg), or external URL (e.g., https://example.com/image.jpg)
                       </p>
                       {formData.image_url && (
                         <button
@@ -520,7 +526,14 @@ export default function ProductsPage() {
                       </label>
                       <div className="w-32 h-32 border border-border rounded-md overflow-hidden bg-muted">
                         <Image
-                          src={imagePreview || (formData.image_url.startsWith('/images/') ? formData.image_url : `/images/${formData.image_url}`)}
+                          src={
+                            imagePreview || 
+                            (formData.image_url.startsWith('http://') || formData.image_url.startsWith('https://')
+                              ? formData.image_url
+                              : formData.image_url.startsWith('/')
+                              ? formData.image_url
+                              : `/images/${formData.image_url}`)
+                          }
                           alt="Product preview"
                           width={128}
                           height={128}
